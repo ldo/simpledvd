@@ -1,0 +1,914 @@
+#!/usr/bin/python
+#+
+# simpledvd -- a script to construct a DVD-Video disc in as few steps as possible.
+#
+# Invoke this tool from the command line as follows:
+#
+#     simpledvd spec.xml outdir
+#
+# where spec.xml is the name of the XML file describing the contents of the DVD,
+# and outdir is the name of the output directory in which to create the contents,
+# ready for burning to disc.
+#
+# The XML file looks like this:
+#
+# <simpledvd aspect=aspectratio format=format title=title
+#     fgcolor=fgcolor bgcolor=bgcolor highlightcolor=highlightcolor selectcolor=selectcolor
+#     item_mark=item_mark>
+#     <track title=tracktitle src=tracksrc/>
+#     <track .../>
+# </simpledvd>
+#
+# where aspectratio can be either "4:3" or "16:9", format is "pal" or "ntsc",
+# title is the title to appear at the top of the menu, fgcolor is the colour to
+# use for the menu text, bgcolor is the colour of the menu background, highlightcolor
+# the colour to use for indicating the currently-highlighted menu item (as changed by
+# using the menu navigation buttons on the DVD player remote), and selectcolor the
+# colour in which to momentarily display the item when the OK/Enter key is hit on the
+# remote before acting on the menu selection (some players may not show this). item_mark
+# is the mark to display next to the currently-highlighted menu item.
+#
+# Colours are specified in standard HTML format; either as three pairs of hex digits
+# "#rrggbb" or as one of the predefined colour names as listed in the HTML 4.01 spec.
+#
+# Each track is defined by a "<track .../>" directive; tracktitle is the text to
+# show in the menu for this track, and tracksrc is the name of the MPEG file that
+# actually contains the track contents, ready for feeding to dvdauthor.
+#
+# Example:
+# <simpledvd
+#    aspect="4:3" format="pal"
+#    title="Sample Disc"
+#    fgcolor="#008000"
+#    bgcolor="#ffff00"
+#    highlightcolor="lime"
+#    selectcolor="fuchsia"
+#    item_mark="&gt;"
+# >
+#     <track title="Item 1" src="item1.mpg"/>
+#     <track title="Item 2" src="item2.mpg"/>
+# </simpledvd>
+#
+# External programs needed: bash, dvdauthor & spumux, ffmpeg, dd
+#
+# Start of development 2008 November 24 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+# First successful DVD generation 2008 November 24.
+# Pass correct aspect ratio to FFmpeg 2008 November 26.
+# Add explanation of XML file format, call png_set_packswap instead of doing
+#     time-consuming bit-swapping myself 2008 November 27.
+# Forgot to adjust button coords for destination dimensions 2008 December 1.
+#-
+
+from __future__ import division
+import sys
+import os
+import array
+import struct
+import re
+import xml.parsers.expat as expat
+import xml.sax.saxutils as saxutils
+import ctypes as ct
+import cairo
+import subprocess
+import tempfile
+import getopt
+
+#+
+# Miscellaneous useful stuff
+#-
+
+def iam_big_endian() :
+	"""is the current CPU big-endian."""
+	thestr = "\xAA\x55" # any value with two different bytes
+	return struct.unpack(">H", thestr)[0] == struct.unpack("@H", thestr)[0]
+#end iam_big_endian
+
+def delete_dir(dir) :
+	if os.path.isdir(dir) :
+		for parent, dirs, files in os.walk(dir, topdown = False) :
+			for item in files :
+				os.remove(os.path.join(parent, item))
+			#end for
+			for item in dirs :
+				os.rmdir(os.path.join(parent, item))
+			#end for
+		#end for
+		os.rmdir(dir)
+	#end if
+#end delete_dir
+
+def shell_escape(Arg) :
+	"""returns Arg suitably escaped for use as a command-line argument
+	to Bash."""
+	return \
+		re.sub \
+		  (
+			r"[\<\>\"\'\|\&\$\#\;\(\)\[\]\{\}\`\!\~\ \\]",
+			lambda Match : "\\" + Match.group(0),
+			Arg
+		  )
+		  # Need to catch anything that might be meaningful to shell
+#end shell_escape
+
+def check_child_status(status) :
+	if status != 0 :
+		sys.stderr.write(" child terminated with status %04x\n" % status)
+	#end if
+#end check_child_status
+
+def runcmd(cmd) :
+	"""runs a command in Bash and waits for it complete."""
+	sys.stderr.write("runcmd: %s\n" % cmd) # debug
+	child = subprocess.Popen \
+	  (
+		args = ("bash", "-c", cmd),
+		close_fds = True,
+		shell = False
+	  )
+	check_child_status(child.wait())
+#end runcmd
+
+#+
+# Format definitions
+#-
+
+video_formats = \
+	{
+		"ntsc" :
+			{
+				"width" : 720,
+				"height" : 480,
+				"ffmpeg_preset" : "ntsc-dvd",
+			},
+		"pal" :
+			{
+				"width" : 720,
+				"height" : 576,
+				"ffmpeg_preset" : "pal-dvd",
+			},
+	}
+working_sizes = \
+	{ # indexed by aspect ratio
+		"4:3" :
+			{
+				"width" : 768,
+				"height" : 576,
+				"ffmpeg_aspect" : "4:3",
+			},
+		"16:9" :
+			{
+				"width" : 1024,
+				"height" : 576,
+				"ffmpeg_aspect" : "16:9",
+			},
+	}
+
+#+
+# Useful PNG-related stuff
+#-
+
+png = ct.cdll.LoadLibrary("libpng.so")
+png.png_create_write_struct.restype = ct.c_void_p
+png.png_create_info_struct.restype = ct.c_void_p
+
+class PNG :
+	"""constants and types copied from png.h"""
+
+	COLOR_MASK_PALETTE = 1
+	COLOR_MASK_COLOR = 2
+	COLOR_MASK_ALPHA = 4
+	# color types.  Note that not all combinations are legal
+	COLOR_TYPE_GRAY = 0
+	COLOR_TYPE_PALETTE = COLOR_MASK_COLOR | COLOR_MASK_PALETTE
+	COLOR_TYPE_RGB = COLOR_MASK_COLOR
+	COLOR_TYPE_RGB_ALPHA = COLOR_MASK_COLOR | COLOR_MASK_ALPHA
+	COLOR_TYPE_GRAY_ALPHA = COLOR_MASK_ALPHA
+	# aliases
+	COLOR_TYPE_RGBA = COLOR_TYPE_RGB_ALPHA
+	COLOR_TYPE_GA = COLOR_TYPE_GRAY_ALPHA
+
+	INTERLACE_NONE = 0 # Non-interlaced image
+	INTERLACE_ADAM7 = 1 # Adam7 interlacing
+
+	COMPRESSION_TYPE_BASE = 0 # Deflate method 8, 32K window
+	COMPRESSION_TYPE_DEFAULT = COMPRESSION_TYPE_BASE
+
+	FILTER_TYPE_BASE = 0 # Single row per-byte filtering
+	INTRAPIXEL_DIFFERENCING = 64 # Used only in MNG datastreams
+	FILTER_TYPE_DEFAULT = FILTER_TYPE_BASE
+
+	class color(ct.Structure) :
+		_fields_ = \
+			[
+				("red", ct.c_byte),
+				("green", ct.c_byte),
+				("blue", ct.c_byte),
+			]
+	#end color
+
+#end PNG
+
+def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destfilename) :
+	"""writes the buffer object pixels, consisting of width * height 1-bit pixels,
+	where 0 represents backcolor and 1 represent forecolor (both (r, g, b) tuples)
+	to the file named destfilename in PNG format."""
+
+	class bytebits(ct.Structure) :
+		_fields_ = [("b%d" % i, ct.c_uint, 1) for i in range(0, 8)]
+	#end bytebits
+
+	def write_data(png_ptr, data, datalen) :
+		data = ct.cast(data, ct.POINTER(ct.c_char))
+		for i in range(0, datalen) :
+			tofile.write(data[i])
+		#end for
+	#end write_data
+
+	def flush_write(png_ptr) :
+		# never called?
+		tofile.flush()
+	#end flush_write
+
+#begin write_bilevel_png
+	tofile = open(destfilename, "w")
+	write_struct = png.png_create_write_struct("1.2.31", None, None, None)
+	infop = png.png_create_info_struct(write_struct)
+	png.png_set_write_fn \
+	  (
+		write_struct,
+		None,
+		ct.CFUNCTYPE(None, ct.c_void_p, ct.c_void_p, ct.c_size_t)(write_data),
+		ct.CFUNCTYPE(None, ct.c_void_p)(flush_write)
+	  )
+
+	png.png_set_IHDR \
+	  (
+		write_struct,
+		infop,
+		width,
+		height,
+		1, # bit_depth
+		PNG.COLOR_TYPE_PALETTE, # color_type
+		PNG.INTERLACE_NONE, # interlace_type
+		PNG.COMPRESSION_TYPE_DEFAULT, # compression_type
+		PNG.FILTER_TYPE_DEFAULT # filter_method
+	  )
+	png.png_set_PLTE \
+	  (
+		write_struct,
+		infop,
+		(PNG.color * 2)
+			(
+				PNG.color(*backcolor),
+				PNG.color(*forecolor),
+			),
+		2 # num_palette
+	  )
+	png.png_set_tRNS \
+	  (
+		write_struct,
+		infop,
+		(ct.c_byte * 1)(0), # trans
+		1, # num_trans
+		None # trans_values
+	  )
+	png.png_write_info(write_struct, infop)
+	rowlen = (width + 7) // 8
+	if False :
+		imagebuf = ct.create_string_buffer(height * rowlen)
+		for i in range(0, height) :
+			for j in range(0, rowlen) :
+				b = ct.cast(pixels.buffer_info()[0] + i * stride + j, ct.POINTER(bytebits))[0]
+				# ordering of pixels within byte is endian-specific in Cairo,
+				# but not in libpng
+				imagebuf[i * rowlen + j] = chr \
+					(
+						b.b7
+					|
+						b.b6 << 1
+					|
+						b.b5 << 2
+					|
+						b.b4 << 3
+					|
+						b.b3 << 4
+					|
+						b.b2 << 5
+					|
+						b.b1 << 6
+					|
+						b.b0 << 7
+					)
+			#end for
+		#end for
+		imagearr = \
+			(ct.c_void_p * height) \
+				(*(ct.addressof(imagebuf) + rowlen * i for i in range(0, height)))
+		png.png_write_image(write_struct, ct.addressof(imagearr))
+	else :
+		if not iam_big_endian() :
+			png.png_set_packswap(write_struct)
+			  # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
+		#end if
+		for i in range(0, height) :
+			png.png_write_row \
+			  (
+				write_struct,
+				pixels.buffer_info()[0] + i * stride
+			  )
+		#end for
+	#end if
+	png.png_write_end(write_struct, infop)
+	png.png_destroy_write_struct(ct.byref(ct.c_void_p(write_struct)), ct.byref(ct.c_void_p(infop)))
+	tofile.flush()
+	tofile.close()
+#end write_bilevel_png
+
+#+
+# Temp directory management
+#-
+
+temp_dir = None
+
+def create_temp_dir() :
+	global temp_dir
+	if temp_dir == None :
+		temp_dir = tempfile.mkdtemp(prefix = "simpledvd-")
+	#end if
+#end create_temp_dir
+
+def cleanup_temp_dir() :
+	global temp_dir
+	if temp_dir != None :
+		delete_dir(temp_dir)
+		temp_dir = None
+	#end if
+#end cleanup_temp_dir
+
+#+
+# Spec file parsing
+#-
+
+def parse_color(color) :
+	"""parses color as either a standard HTML colour name or #rrggbb. Returns
+	an (r, g, b) tuple."""
+	if color[0] == "#" and len(color) == 7 :
+		result = color[1:]
+	else :
+		# assume it's a name
+		result = \
+			{
+				"black" : "000000",
+				"green" : "008000",
+				"silver" : "C0C0C0",
+				"lime" : "00FF00",
+				"gray" : "808080",
+				"olive" : "808000",
+				"white" : "FFFFFF",
+				"yellow" : "FFFF00",
+				"maroon" : "800000",
+				"navy" : "000080",
+				"red" : "FF0000",
+				"blue" : "0000FF",
+				"purple" : "800080",
+				"teal" : "008080",
+				"fuchsia" : "FF00FF",
+				"aqua" : "00FFFF",
+			}[color.lower()]
+	#end if
+	return tuple(int(result[i * 2 : i * 2 + 2], 16) for i in range(0, 3))
+#end parse_color
+
+def parse_contents_spec(filename) :
+	"""reads and parses the contents of filename as XML, and returns
+	the interpreted results as a dictionary, as follows:
+		aspect -- the aspect ratio, either "16:9" or "4:3"
+		format -- the video format, either "ntsc" or "pal"
+		title -- the title for the menu
+		fgcolor -- the foreground colour to use
+		bgcolor -- the background colour to use
+		highlightcolor -- the colour to use to highlight a menu item
+		selectcolor -- the colour to use when a menu item is selected
+		tracks -- a list of the tracks in order, each being a dictionary containing
+				title -- the name to show on the menu
+				src -- the name of the input video file for the track
+	All colours are expressed as (r, g, b) tuples where each component is an integer
+	in [0 .. 255].
+	"""
+
+	parse_state = {"nest" : 0, "main_seen" : False}
+	result = {}
+
+	def require_attrs(tag, attrs, attrnames) :
+		"""ensures that attrs has values for all keys listed in attrnames."""
+		if not reduce(lambda a, b : a and b, (name in attrs for name in attrnames), True) :
+			raise RuntimeError("missing required attributes for \"%s\"" % tag)
+		#end if
+	#end require_attrs
+
+	def handle_main_def(tag, attrs) :
+		# called for the top-level "simpledvd" tag.
+		required = \
+			{
+				"aspect" : tuple(working_sizes.keys()),
+				"format" : tuple(video_formats.keys()),
+			}
+		colors = ("fgcolor", "bgcolor", "highlightcolor", "selectcolor")
+		require_attrs(tag, attrs, tuple(required.keys()) + ("title", "item_mark") + colors)
+		for key in required.keys() :
+			value = attrs[key].encode("utf8")
+			if value not in required[key] :
+				raise RuntimeError("invalid value %s for %s" % (repr(value), key))
+			#end if
+			result[key] = value
+		#end if
+		result["title"] = attrs["title"]
+		result["item_mark"] = attrs["item_mark"]
+		for key in colors :
+			result[key] = parse_color(attrs[key])
+		#end for
+		result["tracks"] = []
+	#end handle_main_def
+
+	def handle_track_def(tag, attrs) :
+		# called for the "track" tag (one or more instances).
+		require_attrs(tag, attrs, ("title", "src"))
+		result["tracks"].append({"title" : attrs["title"], "src" : attrs["src"].encode("utf8")})
+	#end handle_track_def
+
+	element_handlers = \
+		{
+			"track" : handle_track_def,
+		}
+
+	def handle_start_element(name, attrs) :
+		if parse_state["nest"] == 1 :
+			parse_state["nest"] = 2
+			handler = element_handlers.get(name)
+			if handler != None :
+				handler(name, attrs)
+			else :
+				raise RuntimeError \
+				  (
+					"unrecognized element \"%s\"." % name
+				  )
+			#end if
+		elif parse_state["nest"] == 0 :
+			if name == "simpledvd" :
+				parse_state["nest"] = 1
+				parse_state["main_seen"] = True
+				handle_main_def(name, attrs)
+			else :
+				raise RuntimeError \
+				  (
+					"unrecognized top-level element \"%s\"." % name
+				  )
+			#end if
+		else :
+			raise RuntimeError("unrecognized element nesting")
+		#end if
+	#end handle_start_element
+
+	def handle_end_element(name) :
+		parse_state["nest"] -= 1
+	#end handle_end_element
+
+#begin parse_contents_spec
+	parser = expat.ParserCreate()
+	parser.StartElementHandler = handle_start_element
+	parser.EndElementHandler = handle_end_element
+	parser.ParseFile(open(filename, "r"))
+	  # can raise expat.ExpatError
+	if not parse_state["main_seen"] :
+		raise RuntimeError("missing \"simpledvd\" element")
+	#end if
+	if len(result["tracks"]) == 0 :
+		raise RuntimeError("need at least one track")
+	#end if
+	return result
+#end parse_contents_spec
+
+#+
+# Menu rendering
+#-
+
+def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
+	"""renders the menu image into a PNG file named destfilename. overlay
+	is True for the selected and highlighted versions, false for the
+	normal (background) image. Also fills in button dimensions for
+	each track if overlay."""
+	srcdimensions = working_sizes[spec["aspect"]]
+	dstdimensions = video_formats[spec["format"]]
+	if overlay :
+	  # generate bilevel image
+	  # can't find format_stride_for_width?
+		srcstride = (srcdimensions["width"] + 31 - 1) // 32 * 4
+		dststride = (dstdimensions["width"] + 31 - 1) // 32 * 4
+	else :
+		srcstride = srcdimensions["width"] * 4
+		dststride = dstdimensions["width"] * 4
+	#end if
+	srcpixbuf = array.array("B", '\0' * srcdimensions["height"] * srcstride)
+	srcpixsurface = cairo.ImageSurface.create_for_data \
+	  (
+		srcpixbuf,
+		(cairo.FORMAT_ARGB32, cairo.FORMAT_A1)[overlay],
+		srcdimensions["width"],
+		srcdimensions["height"],
+		srcstride
+	  )
+	draw = cairo.Context(srcpixsurface)
+	if overlay :
+		draw.set_source_rgba(0, 0, 0, 0)
+	else :
+		draw.set_source_rgb(*backcolor)
+	#end if
+	draw.rectangle(0, 0, srcdimensions["width"], srcdimensions["height"])
+	draw.fill()
+	if overlay :
+		draw.set_source_rgba(0, 0, 0, 1)
+	else :
+		draw.set_source_rgb(*forecolor)
+	#end if
+	draw.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+	  # how to do more than toy font support in PyCairo?
+	font_extents = dict(zip(
+		("ascent", "descent", "height", "max_x_advance", "max_y_advance"),
+		draw.font_extents()
+	))
+	sys.stderr.write("font extents: %s\n" % repr(font_extents)) # debug
+	sys.stderr.write("font matrix: %s\n" % draw.get_font_matrix()) # debug
+	linespace_factor = 1.2
+	nr_lines = \
+		(
+			len(spec["tracks"])
+		+
+			1 # title
+		+
+			2 # top and bottom margins
+		)
+	text_height = srcdimensions["height"] / linespace_factor / nr_lines
+	text_scale = text_height / font_extents["height"]
+	sys.stderr.write("new text height:: %.2f\n" % text_height) # debug
+	font_matrix = draw.get_font_matrix()
+	font_matrix.scale(text_scale, text_scale)
+	  # scale to height, assume width of titles won't be too great!
+	draw.set_font_matrix(font_matrix)
+	sys.stderr.write("new font matrix: %s\n" % draw.get_font_matrix()) # debug
+	indent = font_extents["max_x_advance"] * text_scale
+	draw.move_to(indent, text_height + font_extents["ascent"] * text_scale)
+	if not overlay :
+		draw.show_text(spec["title"].encode("utf8"))
+	#end if
+	for i in range(0, len(spec["tracks"])) :
+		track = spec["tracks"][i]
+		v = text_height * (i + 2) + font_extents["ascent"] * text_scale
+		if overlay :
+			draw.move_to(indent, v)
+			button_extents = dict(zip(
+				("x_bearing", "y_bearing", "width", "height", "x_advance", "y_advance"),
+				draw.text_extents(spec["item_mark"])
+			))
+			track["button"] = tuple \
+			  (
+					int(round(i))
+				for i in
+					(
+						indent + button_extents["x_bearing"], # x
+						v + button_extents["y_bearing"], # y
+						button_extents["width"], # width
+						button_extents["height"], # height
+					)
+			  )
+			sys.stderr.write("button %d extents %s button %s\n" % (i + 1, repr(button_extents), repr(track["button"]))) # debug
+			draw.show_text(spec["item_mark"])
+		else :
+			draw.move_to(indent * 2, v)
+			draw.show_text(track["title"])
+		#end if
+	#end for
+	srcpixsurface.flush()
+	# rescale to dstdimensions
+	dstpixbuf = array.array("B", '\0' * dstdimensions["height"] * dststride)
+	dstpixsurface = cairo.ImageSurface.create_for_data \
+	  (
+		dstpixbuf,
+		(cairo.FORMAT_ARGB32, cairo.FORMAT_A1)[overlay],
+		dstdimensions["width"],
+		dstdimensions["height"],
+		dststride
+	  )
+	draw = cairo.Context(dstpixsurface)
+	srcpixpat = cairo.SurfacePattern(srcpixsurface)
+	patmatrix = cairo.Matrix()
+	patmatrix.scale \
+	  (
+		srcdimensions["width"] / dstdimensions["width"],
+		srcdimensions["height"] / dstdimensions["height"]
+	  )
+	srcpixpat.set_matrix(patmatrix)
+	draw.set_source(srcpixpat)
+	draw.paint()
+	dstpixsurface.flush()
+	if overlay :
+		write_bilevel_png \
+		  (
+			pixels = dstpixbuf,
+			width = dstdimensions["width"],
+			height = dstdimensions["height"],
+			stride = dststride,
+			backcolor = backcolor,
+			forecolor = forecolor,
+			destfilename = destfilename
+		  )
+	else :
+		dstpixsurface.write_to_png(destfilename)
+	#end if
+#end render_menu
+
+def generate_menu_background(spec, parent_dir, image_names) :
+	"""runs FFmpeg to create the menu background movie file."""
+	runcmd \
+	  (
+			"ffmpeg -loop_input -t 1.0 -i %(stillframename)s"
+			" -ar 48000 -f s16le -i <(dd if=/dev/zero bs=19200 count=1)"
+			" -target %(preset)s -aspect %(aspect)s %(outmenuname)s"
+		%
+			{
+				"stillframename" : shell_escape(os.path.join(parent_dir, image_names["background"])),
+				"preset" : video_formats[spec["format"]]["ffmpeg_preset"],
+				"aspect" : working_sizes[spec["aspect"]]["ffmpeg_aspect"],
+				"outmenuname" :
+					shell_escape(os.path.join(parent_dir, image_names["menu_background"])),
+			}
+	  )
+#end generate_menu_background
+
+#+
+# XML generation
+#-
+
+def button_name(index) :
+	"""generates uniform names for menu buttons."""
+	return "button_%d" % (index + 1)
+#end button_name
+
+def map_button_x(x, spec) :
+	return int(round
+		(
+			x
+		/
+			working_sizes[spec["aspect"]]["width"]
+		*
+			video_formats[spec["format"]]["width"]
+		))
+#end map_button_x
+
+def map_button_y(y, spec) :
+	return \
+		(
+			int(round(
+					y
+				/
+					working_sizes[spec["aspect"]]["height"]
+				*
+					video_formats[spec["format"]]["height"]
+			))
+		&
+			~1
+		)
+#end map_button_y
+
+def generate_menu_xml(spec, parent_dir, image_names, out) :
+	"""generates the XML file used to drive spumux to create the menu movie file."""
+	out.write("<subpictures>\n")
+	out.write("    <stream>\n")
+	out.write("        <spu\n")
+	out.write("            force=\"yes\"\n")
+	out.write("            transparent=\"ffffff\"\n") # ?
+	out.write("            start=\"00:00:00.0\"\n") # ?
+	out.write("            end=\"00:00:00.0\"\n") # ?
+	out.write \
+	  (
+			"            highlight=%s\n"
+		%
+			saxutils.quoteattr(os.path.join(parent_dir, image_names["highlighted"]))
+	  )
+	out.write \
+	  (
+			"            select=%s\n"
+		%
+			saxutils.quoteattr(os.path.join(parent_dir, image_names["selected"]))
+	  )
+	out.write("        >\n")
+	nr_tracks = len(spec["tracks"])
+	for i in range(0, nr_tracks) :
+		button = spec["tracks"][i]["button"]
+		out.write \
+		  (
+				"            <button x0=\"%(x0)d\" y0=\"%(y0)d\" x1=\"%(x1)d\" y1=\"%(y1)d\""
+				" name=%(name)s up=%(up)s down=%(down)s/>\n"
+			%
+				{
+					"x0" : map_button_x(button[0], spec),
+					"y0" : map_button_y(button[1], spec),
+					"x1" : map_button_x(button[0] + button[2], spec),
+					"y1" : map_button_y((button[1] + button[3]), spec),
+					"name" : saxutils.quoteattr(button_name(i)),
+					"up" : saxutils.quoteattr(button_name((i + nr_tracks - 1) % nr_tracks)),
+					"down" : saxutils.quoteattr(button_name((i + 1) % nr_tracks)),
+				}
+		  )
+	#end for
+	out.write("        </spu>\n")
+	out.write("    </stream>\n")
+	out.write("</subpictures>\n")
+#end generate_menu_xml
+
+def generate_author_xml(spec, parent_dir, image_names, out) :
+	"""generates the XML file used to drive dvdauthor to create the complete DVD."""
+	video_format = \
+	  (
+			"            <video format=\"%(format)s\" aspect=\"%(aspect)s\""
+			" resolution=\"%(width)dx%(height)d\"/>\n"
+		%
+			{
+				"format" : spec["format"],
+				"aspect" : spec["aspect"],
+				"width" : video_formats[spec["format"]]["width"],
+				"height" : video_formats[spec["format"]]["height"],
+			}
+	  )
+	out.write("<dvdauthor>\n")
+	out.write("    <vmgm>\n")
+	out.write("        <fpc>\n")
+	  # GPRM usage: g0 is index of selected title
+	out.write("            g0 = 0;\n")
+	out.write("            jump titleset 1 menu entry root;\n")
+	out.write("        </fpc>\n")
+	out.write("        <menus>\n")
+	out.write("            <pgc entry=\"title\">\n")
+	out.write("                <pre>\n")
+	out.write("                    jump titleset 1 menu entry root;\n")
+	out.write("                </pre>\n")
+	out.write("            </pgc>\n")
+	out.write("        </menus>\n")
+	out.write("    </vmgm>\n")
+	out.write("    <titleset>\n")
+	out.write("        <menus>\n")
+	out.write(video_format)
+	out.write("            <pgc entry=\"root\">\n")
+	out.write("                <pre>\n")
+	out.write("                    if (g0 eq 0)\n")
+	out.write("                      {\n")
+	out.write("                        g0 = 1;\n") # default to first title
+	out.write("                      }\n")
+	out.write("                     button = g0 * 1024;\n")
+	out.write("                </pre>\n")
+	out.write \
+	  (
+			"                <vob file=%(menu)s pause=\"inf\"/>\n"
+		%
+			{
+				"menu" : saxutils.quoteattr(os.path.join(parent_dir, image_names["menu_movie"])),
+			}
+	  )
+	for i in range(0, len(spec["tracks"])) :
+		out.write("                <button name=%s>\n" % saxutils.quoteattr(button_name(i)))
+		out.write("                    jump title %d;\n" % (i + 1))
+		out.write("                </button>\n")
+	#end for
+	out.write("                <post>\n")
+	out.write("                    jump menu entry root;\n")
+	out.write("                </post>\n")
+	out.write("            </pgc>\n")
+	out.write("        </menus>\n")
+	out.write("        <titles>\n")
+	out.write(video_format)
+	nr_tracks = len(spec["tracks"])
+	for i in range(0, nr_tracks) :
+		track = spec["tracks"][i]
+		out.write("            <pgc pause=\"0\">\n")
+		out.write \
+		  (
+				"                <vob file=%(src)s chapters=\"00:00:00.000\"/>\n"
+			%
+				{
+					"src" : saxutils.quoteattr(track["src"]),
+				}
+		  )
+		out.write("                <post>\n")
+		out.write("                    g0 = %d;\n" % ((i + 1) % nr_tracks + 1))
+		  # preselect next track on returning to menu
+		out.write("                    call menu entry root;\n")
+		out.write("                </post>\n")
+		out.write("            </pgc>\n")
+	#end for
+	out.write("        </titles>\n")
+	out.write("    </titleset>\n")
+	out.write("</dvdauthor>\n")
+#end generate_author_xml
+
+#+
+# Mainline
+#-
+
+debug = False
+do_spumux = True
+do_author = True
+keep_temps = False
+(opts, args) = getopt.getopt \
+  (
+	sys.argv[1:],
+	"",
+	("debug", "keep-temp", "no-author", "no-spumux")
+  )
+if len(args) != 2 :
+	raise getopt.GetoptError("need exactly twos args, the name of the spec file and the destination directory")
+#end if
+for keyword, value in opts :
+	if keyword == "--debug" :
+		debug = True # TBD
+	elif keyword == "--keep-temp" :
+		keep_temps = True
+	elif keyword == "--no-author" :
+		do_author = False
+	elif keyword == "--no-spumux" :
+		do_spumux = False
+	#end if
+#end for
+
+create_temp_dir()
+
+spec = parse_contents_spec(args[0])
+dstdir = args[1]
+sys.stderr.write("spec contents: %s\n" % repr(spec)) # debug
+
+image_names = \
+	{ # names to use for temp image/xml/movie files
+		"background" : "menu_bg.png", # menu background
+		"highlighted" : "menu_highlighted.png", # menu item highlights
+		"selected" : "menu_selected.png", # menu items selected
+		"menu_background" : "menu_bg.mpg", # menu background movie
+		"menu_movie" : "menu.mpg",# complete menu movie
+		"menu_control" : "menu.xml", # spumux control file
+		"author_control" : "dvd.xml", # dvdauthor control file
+	}
+
+render_menu \
+  (
+	spec = spec,
+	backcolor = spec["bgcolor"],
+	forecolor = spec["fgcolor"],
+	overlay = False,
+	destfilename = os.path.join(temp_dir, image_names["background"])
+  )
+render_menu \
+  (
+	spec = spec,
+	backcolor = spec["bgcolor"],
+	forecolor = spec["highlightcolor"],
+	overlay = True,
+	destfilename = os.path.join(temp_dir, image_names["highlighted"])
+  )
+render_menu \
+  (
+	spec = spec,
+	backcolor = spec["bgcolor"],
+	forecolor = spec["selectcolor"],
+	overlay = True,
+	destfilename = os.path.join(temp_dir, image_names["selected"])
+  )
+generate_menu_background(spec, temp_dir, image_names)
+
+control = open(os.path.join(temp_dir, image_names["menu_control"]), "w")
+generate_menu_xml(spec, temp_dir, image_names, control)
+control.flush()
+control.close()
+if do_spumux :
+	child = subprocess.Popen \
+	  (
+		args = ("spumux", "-m", "dvd", os.path.join(temp_dir, image_names["menu_control"])),
+		stdin = open(os.path.join(temp_dir, image_names["menu_background"]), "r"),
+		stdout = open(os.path.join(temp_dir, image_names["menu_movie"]), "w"),
+		close_fds = True
+	  )
+	check_child_status(child.wait())
+#end if
+control = open(os.path.join(temp_dir, image_names["author_control"]), "w")
+generate_author_xml(spec, temp_dir, image_names, control)
+control.flush()
+control.close()
+if do_author :
+	delete_dir(dstdir) # in case it already exists
+	child = subprocess.Popen \
+	  (
+		args = ("dvdauthor", "-o", dstdir, "-x", os.path.join(temp_dir, image_names["author_control"])),
+		close_fds = True
+	  )
+	check_child_status(child.wait())
+#end if
+
+if not keep_temps :
+	cleanup_temp_dir()
+#end if
