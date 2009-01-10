@@ -53,10 +53,6 @@
 #
 # Start of development 2008 November 24 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 # First successful DVD generation 2008 November 24.
-# Pass correct aspect ratio to FFmpeg 2008 November 26.
-# Add explanation of XML file format, call png_set_packswap instead of doing
-#     time-consuming bit-swapping myself 2008 November 27.
-# Forgot to adjust button coords for destination dimensions 2008 December 1.
 #-
 
 from __future__ import division
@@ -532,6 +528,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
 	#end if
 	draw.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
 	  # how to do more than toy font support in PyCairo?
+	draw.set_font_matrix(cairo.Matrix())
 	font_extents = dict(zip(
 		("ascent", "descent", "height", "max_x_advance", "max_y_advance"),
 		draw.font_extents()
@@ -550,12 +547,28 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
 	text_height = srcdimensions["height"] / linespace_factor / nr_lines
 	text_scale = text_height / font_extents["height"]
 	sys.stderr.write("new text height:: %.2f\n" % text_height) # debug
-	font_matrix = draw.get_font_matrix()
+	font_matrix = cairo.Matrix()
 	font_matrix.scale(text_scale, text_scale)
-	  # scale to height, assume width of titles won't be too great!
+	  # scale to height to begin with
 	draw.set_font_matrix(font_matrix)
-	sys.stderr.write("new font matrix: %s\n" % draw.get_font_matrix()) # debug
 	indent = font_extents["max_x_advance"] * text_scale
+	for i in range(0, len(spec["tracks"])) :
+		# check widths of titles to ensure they don't run off the end
+		track = spec["tracks"][i]
+		title_extents = dict(zip(
+			("x_bearing", "y_bearing", "width", "height", "x_advance", "y_advance"),
+			draw.text_extents(track["title"])
+		))
+		if indent * 2 + title_extents["width"] > srcdimensions["width"] - indent :
+			text_scale = text_scale * (srcdimensions["width"] - indent) / (indent * 2 + title_extents["width"])
+			indent = font_extents["max_x_advance"] * text_scale
+			font_matrix = cairo.Matrix()
+			font_matrix.scale(text_scale, text_scale)
+			  # scale to height to begin with
+			draw.set_font_matrix(font_matrix)
+			sys.stderr.write("new font matrix: %s\n" % draw.get_font_matrix()) # debug
+		#end if
+	#end for
 	draw.move_to(indent, text_height + font_extents["ascent"] * text_scale)
 	if not overlay :
 		draw.show_text(spec["title"].encode("utf8"))
@@ -585,6 +598,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
 		else :
 			draw.move_to(indent * 2, v)
 			draw.show_text(track["title"])
+			sys.stderr.write("new font matrix: %s\n" % draw.get_font_matrix()) # debug
 		#end if
 	#end for
 	srcpixsurface.flush()
