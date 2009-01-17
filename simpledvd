@@ -255,8 +255,8 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
 		infop,
 		(PNG.color * 2)
 			(
-				PNG.color(*backcolor),
-				PNG.color(*forecolor),
+				PNG.color(*(int(backcolor[i] * 255) for i in range(0, 3))),
+				PNG.color(*(int(forecolor[i] * 255) for i in range(0, 3))),
 			),
 		2 # num_palette
 	  )
@@ -347,7 +347,7 @@ def cleanup_temp_dir() :
 
 def parse_color(color) :
 	"""parses color as either a standard HTML colour name or #rrggbb. Returns
-	an (r, g, b) tuple."""
+	an (r, g, b) tuple with each component in the range [0.0 .. 1.0]."""
 	if color[0] == "#" and len(color) == 7 :
 		result = color[1:]
 	else :
@@ -372,7 +372,7 @@ def parse_color(color) :
 				"aqua" : "00FFFF",
 			}[color.lower()]
 	#end if
-	return tuple(int(result[i * 2 : i * 2 + 2], 16) for i in range(0, 3))
+	return tuple(int(result[i * 2 : i * 2 + 2], 16) / 255 for i in range(0, 3))
 #end parse_color
 
 def parse_contents_spec(filename) :
