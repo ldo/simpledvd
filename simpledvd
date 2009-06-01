@@ -219,22 +219,27 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
 			tofile.write(data[i])
 		#end for
 	#end write_data
+	cb_write_data = ct.CFUNCTYPE(None, ct.c_void_p, ct.c_void_p, ct.c_size_t)(write_data)
+	  # need to keep a reference to this to stop it being garbage-collected
 
 	def flush_write(png_ptr) :
 		# never called?
 		tofile.flush()
 	#end flush_write
+	cb_flush_write = ct.CFUNCTYPE(None, ct.c_void_p)(flush_write)
+	  # need to keep a reference to this to stop it being garbage-collected
 
 #begin write_bilevel_png
 	tofile = open(destfilename, "w")
 	write_struct = png.png_create_write_struct("1.2.31", None, None, None)
 	infop = png.png_create_info_struct(write_struct)
+	sys.stderr.write("done creating structs\n") # debug
 	png.png_set_write_fn \
 	  (
 		write_struct,
 		None,
-		ct.CFUNCTYPE(None, ct.c_void_p, ct.c_void_p, ct.c_size_t)(write_data),
-		ct.CFUNCTYPE(None, ct.c_void_p)(flush_write)
+		cb_write_data,
+		cb_flush_write
 	  )
 
 	png.png_set_IHDR \
@@ -268,7 +273,9 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
 		1, # num_trans
 		None # trans_values
 	  )
-	png.png_write_info(write_struct, infop)
+	sys.stderr.write("done set info chunks\n") # debug
+	png.png_write_info(ct.c_void_p(write_struct), ct.c_void_p(infop))
+	sys.stderr.write("done write info\n") # debug
 	rowlen = (width + 7) // 8
 	if False :
 		imagebuf = ct.create_string_buffer(height * rowlen)
@@ -306,6 +313,7 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
 			png.png_set_packswap(write_struct)
 			  # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
 		#end if
+		sys.stderr.write("about to write rows\n") # debug
 		for i in range(0, height) :
 			png.png_write_row \
 			  (
