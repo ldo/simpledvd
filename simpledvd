@@ -51,8 +51,7 @@
 #
 # External programs needed: bash, dvdauthor & spumux, ffmpeg, dd
 #
-# Start of development 2008 November 24 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
-# First successful DVD generation 2008 November 24.
+# Written by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 #-
 
 from __future__ import division
@@ -436,28 +435,35 @@ def parse_contents_spec(filename) :
 
 	def handle_track_def(tag, attrs) :
 		# called for the "track" tag (one or more instances).
-		require_attrs(tag, attrs, ("title", "src"))
-		result["tracks"].append({"title" : attrs["title"], "src" : attrs["src"].encode("utf8")})
+		require_attrs(tag, attrs, ("title",))
+		track = {"title" : attrs["title"], "src" : []}
+		if attrs.has_key("src") :
+			track["src"].append(attrs["src"].encode("utf8"))
+		#end if
+		result["tracks"].append(track)
+		parse_state["last_track"] = track
 	#end handle_track_def
+
+	def handle_src_def(tag, attrs) :
+		# called for the "src" tag (one or more instances).
+		require_attrs(tag, attrs, ("path",))
+		parse_state["last_track"]["src"].append(attrs["path"].encode("utf8"))
+	#end handle_src_def
 
 	element_handlers = \
 		{
-			"track" : handle_track_def,
+			1 :
+				{
+					"track" : handle_track_def,
+				},
+			2 :
+				{
+					"src" : handle_src_def,
+				}
 		}
 
 	def handle_start_element(name, attrs) :
-		if parse_state["nest"] == 1 :
-			parse_state["nest"] = 2
-			handler = element_handlers.get(name)
-			if handler != None :
-				handler(name, attrs)
-			else :
-				raise RuntimeError \
-				  (
-					"unrecognized element \"%s\"." % name
-				  )
-			#end if
-		elif parse_state["nest"] == 0 :
+		if parse_state["nest"] == 0 :
 			if name == "simpledvd" :
 				parse_state["nest"] = 1
 				parse_state["main_seen"] = True
@@ -469,12 +475,31 @@ def parse_contents_spec(filename) :
 				  )
 			#end if
 		else :
-			raise RuntimeError("unrecognized element nesting")
+			handlers = element_handlers.get(parse_state["nest"])
+			if handlers != None :
+				handler = handlers.get(name)
+				if handler != None :
+					parse_state["nest"] += 1
+					handler(name, attrs)
+				else :
+					raise RuntimeError \
+					  (
+						"unrecognized element \"%s\"." % name
+					  )
+				#end if
+			else :
+				raise RuntimeError("unrecognized element nesting")
+			#end if
 		#end if
 	#end handle_start_element
 
 	def handle_end_element(name) :
 		parse_state["nest"] -= 1
+		if parse_state["nest"] == 1 and name == "track" :
+			if len(parse_state["last_track"]["src"]) == 0 :
+				raise RuntimeError("need at least one src for track")
+			#end if
+		#end if
 	#end handle_end_element
 
 #begin parse_contents_spec
@@ -811,14 +836,16 @@ def generate_author_xml(spec, parent_dir, image_names, out) :
 	for i in range(0, nr_tracks) :
 		track = spec["tracks"][i]
 		out.write("            <pgc pause=\"0\">\n")
-		out.write \
-		  (
-				"                <vob file=%(src)s chapters=\"00:00:00.000\"/>\n"
-			%
-				{
-					"src" : saxutils.quoteattr(track["src"]),
-				}
-		  )
+		for src in track["src"] :
+			out.write \
+			  (
+					"                <vob file=%(src)s/>\n"
+				%
+					{
+						"src" : saxutils.quoteattr(src),
+					}
+			  )
+		#end if
 		out.write("                <post>\n")
 		out.write("                    g0 = %d;\n" % ((i + 1) % nr_tracks + 1))
 		  # preselect next track on returning to menu
