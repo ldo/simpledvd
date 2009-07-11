@@ -15,7 +15,11 @@
 # <simpledvd aspect=aspectratio format=format title=title
 #     fgcolor=fgcolor bgcolor=bgcolor highlightcolor=highlightcolor selectcolor=selectcolor
 #     item_mark=item_mark>
-#     <track title=tracktitle src=tracksrc/>
+#     <track title=tracktitle src=trackfile/>
+#     <track title=tracktitle>
+#         <src path=trackfile/>
+#         <src .../>
+#     </track>
 #     <track .../>
 # </simpledvd>
 #
@@ -31,9 +35,11 @@
 # Colours are specified in standard HTML format; either as three pairs of hex digits
 # "#rrggbb" or as one of the predefined colour names as listed in the HTML 4.01 spec.
 #
-# Each track is defined by a "<track .../>" directive; tracktitle is the text to
-# show in the menu for this track, and tracksrc is the name of the MPEG file that
-# actually contains the track contents, ready for feeding to dvdauthor.
+# Each track is defined by a "track" directive, where tracktitle is the text to
+# show in the menu for this track. The track contents can be a single file specified as
+# the src attribute, or as a number of files listed in child "src" tags.  Each
+# trackfile is the name of an MPEG file that actually contains the track contents, ready
+# for feeding to dvdauthor.
 #
 # Example:
 # <simpledvd
