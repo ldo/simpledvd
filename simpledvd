@@ -20,7 +20,7 @@
 #         <src path=trackfile/>
 #         <src .../>
 #     </track>
-#     <track .../>
+#     ...
 # </simpledvd>
 #
 # where aspectratio can be either "4:3" or "16:9", format is "pal" or "ntsc",
@@ -31,6 +31,15 @@
 # colour in which to momentarily display the item when the OK/Enter key is hit on the
 # remote before acting on the menu selection (some players may not show this). item_mark
 # is the mark to display next to the currently-highlighted menu item.
+#
+# Alternatively, the XML can take the following simplified form:
+#
+# <simpledvd aspect=aspectratio format=format>
+#    <track ...>
+# </simpledvd>
+#
+# where there is no menu and only a single track, which will start playing as soon
+# as the disc is inserted in the player.
 #
 # Colours are specified in standard HTML format; either as three pairs of hex digits
 # "#rrggbb" or as one of the predefined colour names as listed in the HTML 4.01 spec.
@@ -423,7 +432,13 @@ def parse_contents_spec(filename) :
 				"format" : tuple(video_formats.keys()),
 			}
 		colors = ("fgcolor", "bgcolor", "highlightcolor", "selectcolor")
-		require_attrs(tag, attrs, tuple(required.keys()) + ("title", "item_mark") + colors)
+		menuattrs = ("title", "item_mark")
+		result["makemenu"] = len(set(menuattrs + colors) & set(attrs.keys())) != 0
+		if result["makemenu"] :
+			require_attrs(tag, attrs, tuple(required.keys()) + menuattrs + colors)
+		else :
+			require_attrs(tag, attrs, tuple(required.keys()))
+		#end if
 		for key in required.keys() :
 			value = attrs[key].encode("utf8")
 			if value not in required[key] :
@@ -431,18 +446,28 @@ def parse_contents_spec(filename) :
 			#end if
 			result[key] = value
 		#end if
-		result["title"] = attrs["title"]
-		result["item_mark"] = attrs["item_mark"]
-		for key in colors :
-			result[key] = parse_color(attrs[key])
-		#end for
+		if result["makemenu"] :
+			for key in menuattrs :
+				result[key] = attrs[key]
+			#end for
+			for key in colors :
+				result[key] = parse_color(attrs[key])
+			#end for
+		#end if
 		result["tracks"] = []
 	#end handle_main_def
 
 	def handle_track_def(tag, attrs) :
 		# called for the "track" tag (one or more instances).
-		require_attrs(tag, attrs, ("title",))
-		track = {"title" : attrs["title"], "src" : []}
+		track = {"src" : []}
+		if result["makemenu"] :
+			require_attrs(tag, attrs, ("title",))
+			track["title"] = attrs["title"]
+		else :
+			if "title" in attrs :
+				raise RuntimeError("no track title allowed for simple-play disc")
+			#end if
+		#end if
 		if attrs.has_key("src") :
 			track["src"].append(attrs["src"].encode("utf8"))
 		#end if
@@ -519,6 +544,9 @@ def parse_contents_spec(filename) :
 	#end if
 	if len(result["tracks"]) == 0 :
 		raise RuntimeError("need at least one track")
+	#end if
+	if not result["makemenu"] and len(result["tracks"]) != 1 :
+		raise RuntimeError("simple-play DVD must only have one track")
 	#end if
 	return result
 #end parse_contents_spec
@@ -779,7 +807,7 @@ def generate_menu_xml(spec, parent_dir, image_names, out) :
 #end generate_menu_xml
 
 def generate_author_xml(spec, parent_dir, image_names, out) :
-	"""generates the XML file used to drive dvdauthor to create the complete DVD."""
+	"""generates the XML file used to drive dvdauthor to create the complete DVD with a menu."""
 	video_format = \
 	  (
 			"            <video format=\"%(format)s\" aspect=\"%(aspect)s\""
@@ -851,7 +879,7 @@ def generate_author_xml(spec, parent_dir, image_names, out) :
 						"src" : saxutils.quoteattr(src),
 					}
 			  )
-		#end if
+		#end for
 		out.write("                <post>\n")
 		out.write("                    g0 = %d;\n" % ((i + 1) % nr_tracks + 1))
 		  # preselect next track on returning to menu
@@ -863,6 +891,61 @@ def generate_author_xml(spec, parent_dir, image_names, out) :
 	out.write("    </titleset>\n")
 	out.write("</dvdauthor>\n")
 #end generate_author_xml
+
+def generate_simpleplay_xml(spec, parent_dir, out) :
+	"""generates the XML file used to drive dvdauthor to create a DVD to play a single track
+	with no menu."""
+	out.write("<dvdauthor>\n")
+	out.write("    <vmgm>\n")
+	out.write("        <fpc>\n")
+	out.write("            jump titleset 1 menu entry root;\n")
+	out.write("        </fpc>\n")
+	out.write("        <menus>\n")
+	out.write("            <pgc entry=\"title\">\n")
+	out.write("                <pre>\n")
+	out.write("                    jump titleset 1 menu entry root;\n")
+	out.write("                </pre>\n")
+	out.write("            </pgc>\n")
+	out.write("        </menus>\n")
+	out.write("    </vmgm>\n")
+	out.write("    <titleset>\n")
+	out.write("        <menus>\n")
+	out.write("            <pgc entry=\"root\">\n")
+	out.write("                <pre>\n")
+	out.write("                    jump title 1;\n")
+	out.write("                </pre>\n")
+	out.write("            </pgc>\n")
+	out.write("        </menus>\n")
+	out.write("        <titles>\n")
+	out.write \
+	  (
+			"            <video format=\"%(format)s\" aspect=\"%(aspect)s\""
+			" resolution=\"%(width)dx%(height)d\"/>\n"
+		%
+			{
+				"format" : spec["format"],
+				"aspect" : spec["aspect"],
+				"width" : video_formats[spec["format"]]["width"],
+				"height" : video_formats[spec["format"]]["height"],
+			}
+	  )
+	track = spec["tracks"][0] # only track
+	out.write("            <pgc pause=\"0\">\n")
+	for src in track["src"] :
+		out.write \
+		  (
+				"                <vob file=%(src)s/>\n"
+			%
+				{
+					"src" : saxutils.quoteattr(src),
+				}
+		  )
+	#end if
+	out.write("            </pgc>\n")
+	out.write("        </titles>\n")
+	out.write("    </titleset>\n")
+	out.write("</dvdauthor>\n")
+#end generate_simpleplay_xml
 
 #+
 # Mainline
@@ -910,37 +993,39 @@ image_names = \
 		"author_control" : "dvd.xml", # dvdauthor control file
 	}
 
-render_menu \
-  (
-	spec = spec,
-	backcolor = spec["bgcolor"],
-	forecolor = spec["fgcolor"],
-	overlay = False,
-	destfilename = os.path.join(temp_dir, image_names["background"])
-  )
-render_menu \
-  (
-	spec = spec,
-	backcolor = spec["bgcolor"],
-	forecolor = spec["highlightcolor"],
-	overlay = True,
-	destfilename = os.path.join(temp_dir, image_names["highlighted"])
-  )
-render_menu \
-  (
-	spec = spec,
-	backcolor = spec["bgcolor"],
-	forecolor = spec["selectcolor"],
-	overlay = True,
-	destfilename = os.path.join(temp_dir, image_names["selected"])
-  )
-generate_menu_background(spec, temp_dir, image_names)
+if spec["makemenu"] :
+	render_menu \
+	  (
+		spec = spec,
+		backcolor = spec["bgcolor"],
+		forecolor = spec["fgcolor"],
+		overlay = False,
+		destfilename = os.path.join(temp_dir, image_names["background"])
+	  )
+	render_menu \
+	  (
+		spec = spec,
+		backcolor = spec["bgcolor"],
+		forecolor = spec["highlightcolor"],
+		overlay = True,
+		destfilename = os.path.join(temp_dir, image_names["highlighted"])
+	  )
+	render_menu \
+	  (
+		spec = spec,
+		backcolor = spec["bgcolor"],
+		forecolor = spec["selectcolor"],
+		overlay = True,
+		destfilename = os.path.join(temp_dir, image_names["selected"])
+	  )
+	generate_menu_background(spec, temp_dir, image_names)
+	control = open(os.path.join(temp_dir, image_names["menu_control"]), "w")
+	generate_menu_xml(spec, temp_dir, image_names, control)
+	control.flush()
+	control.close()
+#end if
 
-control = open(os.path.join(temp_dir, image_names["menu_control"]), "w")
-generate_menu_xml(spec, temp_dir, image_names, control)
-control.flush()
-control.close()
-if do_spumux :
+if spec["makemenu"] and do_spumux :
 	child = subprocess.Popen \
 	  (
 		args = ("spumux", "-m", "dvd", os.path.join(temp_dir, image_names["menu_control"])),
@@ -951,7 +1036,11 @@ if do_spumux :
 	check_child_status(child.wait())
 #end if
 control = open(os.path.join(temp_dir, image_names["author_control"]), "w")
-generate_author_xml(spec, temp_dir, image_names, control)
+if spec["makemenu"] :
+	generate_author_xml(spec, temp_dir, image_names, control)
+else :
+	generate_simpleplay_xml(spec, temp_dir, control)
+#end if
 control.flush()
 control.close()
 if do_author :
