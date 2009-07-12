@@ -72,6 +72,7 @@
 from __future__ import division
 import sys
 import os
+import errno
 import array
 import struct
 import re
@@ -1044,7 +1045,16 @@ else :
 control.flush()
 control.close()
 if do_author :
-	delete_dir(dstdir) # in case it already exists
+	delete_dir(os.path.join(dstdir, "VIDEO_TS")) # in case it already exists
+	for dir in (os.path.join(dstdir, "AUDIO_TS"), dstdir) : # expecting these to be empty if they exist
+		try :
+			os.rmdir(dir)
+		except OSError, (ErrNo, Msg) :
+			if ErrNo != errno.ENOENT :
+				raise
+			#end if
+		#end try
+	#end for
 	child = subprocess.Popen \
 	  (
 		args = ("dvdauthor", "-o", dstdir, "-x", os.path.join(temp_dir, image_names["author_control"])),
