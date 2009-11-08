@@ -15,9 +15,9 @@
 # <simpledvd aspect=aspectratio format=format title=title
 #     fgcolor=fgcolor bgcolor=bgcolor highlightcolor=highlightcolor selectcolor=selectcolor
 #     item_mark=item_mark>
-#     <track title=tracktitle src=trackfile/>
+#     <track title=tracktitle src=trackfile [chapters=chapters]/>
 #     <track title=tracktitle>
-#         <src path=trackfile/>
+#         <src path=trackfile/ [chapters=chapters]>
 #         <src .../>
 #     </track>
 #     ...
@@ -470,16 +470,26 @@ def parse_contents_spec(filename) :
 			#end if
 		#end if
 		if attrs.has_key("src") :
-			track["src"].append(attrs["src"].encode("utf8"))
+			track["src"].append({"path" : attrs["src"].encode("utf8")})
+		#end if
+		if attrs.has_key("chapters") :
+			if len(track["src"]) != 0 :
+				track["src"][0]["chapters"] = attrs["chapters"].encode("utf8")
+			else :
+				raise RuntimeError("track chapters without src")
+			#end if
 		#end if
 		result["tracks"].append(track)
 		parse_state["last_track"] = track
 	#end handle_track_def
 
 	def handle_src_def(tag, attrs) :
-		# called for the "src" tag (one or more instances).
+		# called for the "src" tag (zero or more instances).
 		require_attrs(tag, attrs, ("path",))
-		parse_state["last_track"]["src"].append(attrs["path"].encode("utf8"))
+		parse_state["last_track"]["src"].append({"path" : attrs["path"].encode("utf8")})
+		if attrs.has_key("chapters") :
+			parse_state["last_track"]["src"][-1]["chapters"] = attrs["chapters"].encode("utf8")
+		#end if
 	#end handle_src_def
 
 	element_handlers = \
@@ -874,12 +884,23 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
 		for src in track["src"] :
 			out.write \
 			  (
-					"                <vob file=%(src)s/>\n"
+					"                <vob file=%(src)s"
 				%
 					{
-						"src" : saxutils.quoteattr(src),
+						"src" : saxutils.quoteattr(src["path"]),
 					}
 			  )
+			if src.has_key("chapters") :
+				out.write \
+				  (
+						" chapters=%(chapters)s"
+					%
+						{
+							"chapters" : saxutils.quoteattr(src["chapters"]),
+						}
+				  )
+			#end if
+			out.write("/>\n")
 		#end for
 		out.write("                <post>\n")
 		out.write("                    g0 = %d;\n" % ((i + 1) % nr_tracks + 1))
@@ -935,12 +956,23 @@ def generate_simpleplay_xml(spec, parent_dir, out) :
 	for src in track["src"] :
 		out.write \
 		  (
-				"                <vob file=%(src)s/>\n"
+				"                <vob file=%(src)s"
 			%
 				{
-					"src" : saxutils.quoteattr(src),
+					"src" : saxutils.quoteattr(src["path"]),
 				}
 		  )
+		if src.has_key("chapters") :
+			out.write \
+			  (
+					" chapters=%(chapters)s"
+				%
+					{
+						"chapters" : saxutils.quoteattr(src["chapters"]),
+					}
+			  )
+		#end if
+		out.write("/>\n")
 	#end if
 	out.write("            </pgc>\n")
 	out.write("        </titles>\n")
