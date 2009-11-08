@@ -708,7 +708,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
 	#end if
 #end render_menu
 
-def generate_menu_background(spec, parent_dir, image_names) :
+def generate_menu_background(spec, parent_dir, file_names) :
 	"""runs FFmpeg to create the menu background movie file."""
 	runcmd \
 	  (
@@ -717,11 +717,11 @@ def generate_menu_background(spec, parent_dir, image_names) :
 			" -target %(preset)s -aspect %(aspect)s %(outmenuname)s"
 		%
 			{
-				"stillframename" : shell_escape(os.path.join(parent_dir, image_names["background"])),
+				"stillframename" : shell_escape(os.path.join(parent_dir, file_names["background"])),
 				"preset" : video_formats[spec["format"]]["ffmpeg_preset"],
 				"aspect" : working_sizes[spec["aspect"]]["ffmpeg_aspect"],
 				"outmenuname" :
-					shell_escape(os.path.join(parent_dir, image_names["menu_background"])),
+					shell_escape(os.path.join(parent_dir, file_names["menu_background"])),
 			}
 	  )
 #end generate_menu_background
@@ -761,7 +761,7 @@ def map_button_y(y, spec) :
 		)
 #end map_button_y
 
-def generate_menu_xml(spec, parent_dir, image_names, out) :
+def generate_menu_xml(spec, parent_dir, file_names, out) :
 	"""generates the XML file used to drive spumux to create the menu movie file."""
 	out.write("<subpictures>\n")
 	out.write("    <stream>\n")
@@ -774,13 +774,13 @@ def generate_menu_xml(spec, parent_dir, image_names, out) :
 	  (
 			"            highlight=%s\n"
 		%
-			saxutils.quoteattr(os.path.join(parent_dir, image_names["highlighted"]))
+			saxutils.quoteattr(os.path.join(parent_dir, file_names["highlighted"]))
 	  )
 	out.write \
 	  (
 			"            select=%s\n"
 		%
-			saxutils.quoteattr(os.path.join(parent_dir, image_names["selected"]))
+			saxutils.quoteattr(os.path.join(parent_dir, file_names["selected"]))
 	  )
 	out.write("        >\n")
 	nr_tracks = len(spec["tracks"])
@@ -807,7 +807,7 @@ def generate_menu_xml(spec, parent_dir, image_names, out) :
 	out.write("</subpictures>\n")
 #end generate_menu_xml
 
-def generate_author_xml(spec, parent_dir, image_names, out) :
+def generate_author_xml(spec, parent_dir, file_names, out) :
 	"""generates the XML file used to drive dvdauthor to create the complete DVD with a menu."""
 	video_format = \
 	  (
@@ -852,7 +852,7 @@ def generate_author_xml(spec, parent_dir, image_names, out) :
 			"                <vob file=%(menu)s pause=\"inf\"/>\n"
 		%
 			{
-				"menu" : saxutils.quoteattr(os.path.join(parent_dir, image_names["menu_movie"])),
+				"menu" : saxutils.quoteattr(os.path.join(parent_dir, file_names["menu_movie"])),
 			}
 	  )
 	for i in range(0, len(spec["tracks"])) :
@@ -983,7 +983,7 @@ spec = parse_contents_spec(args[0])
 dstdir = args[1]
 sys.stderr.write("spec contents: %s\n" % repr(spec)) # debug
 
-image_names = \
+file_names = \
 	{ # names to use for temp image/xml/movie files
 		"background" : "menu_bg.png", # menu background
 		"highlighted" : "menu_highlighted.png", # menu item highlights
@@ -1001,7 +1001,7 @@ if spec["makemenu"] :
 		backcolor = spec["bgcolor"],
 		forecolor = spec["fgcolor"],
 		overlay = False,
-		destfilename = os.path.join(temp_dir, image_names["background"])
+		destfilename = os.path.join(temp_dir, file_names["background"])
 	  )
 	render_menu \
 	  (
@@ -1009,7 +1009,7 @@ if spec["makemenu"] :
 		backcolor = spec["bgcolor"],
 		forecolor = spec["highlightcolor"],
 		overlay = True,
-		destfilename = os.path.join(temp_dir, image_names["highlighted"])
+		destfilename = os.path.join(temp_dir, file_names["highlighted"])
 	  )
 	render_menu \
 	  (
@@ -1017,11 +1017,11 @@ if spec["makemenu"] :
 		backcolor = spec["bgcolor"],
 		forecolor = spec["selectcolor"],
 		overlay = True,
-		destfilename = os.path.join(temp_dir, image_names["selected"])
+		destfilename = os.path.join(temp_dir, file_names["selected"])
 	  )
-	generate_menu_background(spec, temp_dir, image_names)
-	control = open(os.path.join(temp_dir, image_names["menu_control"]), "w")
-	generate_menu_xml(spec, temp_dir, image_names, control)
+	generate_menu_background(spec, temp_dir, file_names)
+	control = open(os.path.join(temp_dir, file_names["menu_control"]), "w")
+	generate_menu_xml(spec, temp_dir, file_names, control)
 	control.flush()
 	control.close()
 #end if
@@ -1029,16 +1029,16 @@ if spec["makemenu"] :
 if spec["makemenu"] and do_spumux :
 	child = subprocess.Popen \
 	  (
-		args = ("spumux", "-m", "dvd", os.path.join(temp_dir, image_names["menu_control"])),
-		stdin = open(os.path.join(temp_dir, image_names["menu_background"]), "r"),
-		stdout = open(os.path.join(temp_dir, image_names["menu_movie"]), "w"),
+		args = ("spumux", "-m", "dvd", os.path.join(temp_dir, file_names["menu_control"])),
+		stdin = open(os.path.join(temp_dir, file_names["menu_background"]), "r"),
+		stdout = open(os.path.join(temp_dir, file_names["menu_movie"]), "w"),
 		close_fds = True
 	  )
 	check_child_status(child.wait())
 #end if
-control = open(os.path.join(temp_dir, image_names["author_control"]), "w")
+control = open(os.path.join(temp_dir, file_names["author_control"]), "w")
 if spec["makemenu"] :
-	generate_author_xml(spec, temp_dir, image_names, control)
+	generate_author_xml(spec, temp_dir, file_names, control)
 else :
 	generate_simpleplay_xml(spec, temp_dir, control)
 #end if
@@ -1057,7 +1057,7 @@ if do_author :
 	#end for
 	child = subprocess.Popen \
 	  (
-		args = ("dvdauthor", "-o", dstdir, "-x", os.path.join(temp_dir, image_names["author_control"])),
+		args = ("dvdauthor", "-o", dstdir, "-x", os.path.join(temp_dir, file_names["author_control"])),
 		close_fds = True
 	  )
 	check_child_status(child.wait())
