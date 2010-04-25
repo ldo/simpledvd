@@ -95,13 +95,15 @@ def iam_big_endian() :
 #end iam_big_endian
 
 def delete_dir(dir) :
+    """deletes dir and all its contents."""
 	if os.path.isdir(dir) :
 		for parent, dirs, files in os.walk(dir, topdown = False) :
 			for item in files :
 				os.remove(os.path.join(parent, item))
 			#end for
 			for item in dirs :
-				os.rmdir(os.path.join(parent, item))
+				item = os.path.join(parent, item)
+				(os.rmdir, os.remove)[os.path.islink(item)](item)
 			#end for
 		#end for
 		os.rmdir(dir)
