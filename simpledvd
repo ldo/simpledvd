@@ -1015,6 +1015,7 @@ create_temp_dir()
 
 spec = parse_contents_spec(args[0])
 dstdir = args[1]
+os.environ["VIDEO_FORMAT"] = spec["format"] # for newer versions of DVDAuthor
 sys.stderr.write("spec contents: %s\n" % repr(spec)) # debug
 
 file_names = \
