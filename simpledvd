@@ -997,7 +997,7 @@ keep_temps = False
     ("debug", "keep-temp", "no-author", "no-spumux")
   )
 if len(args) != 2 :
-    raise getopt.GetoptError("need exactly twos args, the name of the spec file and the destination directory")
+    raise getopt.GetoptError("need exactly two args, the name of the spec file and the destination directory")
 #end if
 for keyword, value in opts :
     if keyword == "--debug" :
