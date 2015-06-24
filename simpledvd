@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 #+
 # simpledvd -- a script to construct a DVD-Video disc in as few steps as possible.
 #
@@ -66,11 +66,10 @@
 #
 # External programs needed: bash, dvdauthor & spumux, ffmpeg, dd
 #
-# Copyright 2008-2013 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+# Copyright 2008-2013, 2015 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 # Licensed under CC-BY-SA <http://creativecommons.org/licenses/by-sa/4.0/>.
 #-
 
-from __future__ import division
 import sys
 import os
 import errno
@@ -153,7 +152,7 @@ working_sizes = \
 # Useful PNG-related stuff
 #-
 
-png = ct.cdll.LoadLibrary("libpng.so")
+png = ct.cdll.LoadLibrary("libpng12.so.0")
 png.png_create_write_struct.restype = ct.c_void_p
 png.png_create_info_struct.restype = ct.c_void_p
 
@@ -220,10 +219,10 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
       # need to keep a reference to this to stop it being garbage-collected
 
 #begin write_bilevel_png
-    tofile = open(destfilename, "w")
-    write_struct = png.png_create_write_struct("1.2.31", None, None, None)
+    tofile = open(destfilename, "wb")
+    write_struct = png.png_create_write_struct(b"1.2.50", None, None, None)
     infop = png.png_create_info_struct(write_struct)
-    sys.stderr.write("done creating structs\n") # debug
+    sys.stderr.write("done creating structs, write_struct = %s, infop = %s\n" % (write_struct, infop)) # debug
     png.png_set_write_fn \
       (
         write_struct,
@@ -264,7 +263,7 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
         None # trans_values
       )
     sys.stderr.write("done set info chunks\n") # debug
-    png.png_write_info(ct.c_void_p(write_struct), ct.c_void_p(infop))
+    png.png_write_info(write_struct, infop)
     sys.stderr.write("done write info\n") # debug
     rowlen = (width + 7) // 8
     if False :
@@ -313,7 +312,9 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
         #end for
     #end if
     png.png_write_end(write_struct, infop)
-    png.png_destroy_write_struct(ct.byref(ct.c_void_p(write_struct)), ct.byref(ct.c_void_p(infop)))
+    write_struct_ptr = ct.c_size_t(write_struct)
+    infop_ptr = ct.c_size_t(infop)
+    png.png_destroy_write_struct(ct.byref(write_struct_ptr), ct.byref(infop_ptr))
     tofile.flush()
     tofile.close()
 #end write_bilevel_png
@@ -395,7 +396,7 @@ def parse_contents_spec(filename) :
 
     def require_attrs(tag, attrs, attrnames) :
         """ensures that attrs has values for all keys listed in attrnames."""
-        if not reduce(lambda a, b : a and b, (name in attrs for name in attrnames), True) :
+        if not all(name in attrs for name in attrnames) :
             raise RuntimeError("missing required attributes for \"%s\"" % tag)
         #end if
     #end require_attrs
@@ -416,7 +417,7 @@ def parse_contents_spec(filename) :
             require_attrs(tag, attrs, tuple(required.keys()))
         #end if
         for key in required.keys() :
-            value = attrs[key].encode("utf8")
+            value = attrs[key]
             if value not in required[key] :
                 raise RuntimeError("invalid value %s for %s" % (repr(value), key))
             #end if
@@ -444,12 +445,12 @@ def parse_contents_spec(filename) :
                 raise RuntimeError("no track title allowed for simple-play disc")
             #end if
         #end if
-        if attrs.has_key("src") :
-            track["src"].append({"path" : attrs["src"].encode("utf8")})
+        if "src" in attrs :
+            track["src"].append({"path" : attrs["src"]})
         #end if
-        if attrs.has_key("chapters") :
+        if "chapters" in attrs :
             if len(track["src"]) != 0 :
-                track["src"][0]["chapters"] = attrs["chapters"].encode("utf8")
+                track["src"][0]["chapters"] = attrs["chapters"]
             else :
                 raise RuntimeError("track chapters without src")
             #end if
@@ -461,9 +462,9 @@ def parse_contents_spec(filename) :
     def handle_src_def(tag, attrs) :
         # called for the "src" tag (zero or more instances).
         require_attrs(tag, attrs, ("path",))
-        parse_state["last_track"]["src"].append({"path" : attrs["path"].encode("utf8")})
-        if attrs.has_key("chapters") :
-            parse_state["last_track"]["src"][-1]["chapters"] = attrs["chapters"].encode("utf8")
+        parse_state["last_track"]["src"].append({"path" : attrs["path"]})
+        if "chapters" in attrs :
+            parse_state["last_track"]["src"][-1]["chapters"] = attrs["chapters"]
         #end if
     #end handle_src_def
 
@@ -523,7 +524,7 @@ def parse_contents_spec(filename) :
     parser = expat.ParserCreate()
     parser.StartElementHandler = handle_start_element
     parser.EndElementHandler = handle_end_element
-    parser.ParseFile(open(filename, "r"))
+    parser.ParseFile(open(filename, "rb"))
       # can raise expat.ExpatError
     if not parse_state["main_seen"] :
         raise RuntimeError("missing \"simpledvd\" element")
@@ -557,7 +558,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         srcstride = srcdimensions["width"] * 4
         dststride = dstdimensions["width"] * 4
     #end if
-    srcpixbuf = array.array("B", '\0' * srcdimensions["height"] * srcstride)
+    srcpixbuf = array.array("B", b'\0' * srcdimensions["height"] * srcstride)
     srcpixsurface = cairo.ImageSurface.create_for_data \
       (
         srcpixbuf,
@@ -624,7 +625,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     #end for
     draw.move_to(indent, text_height + font_extents["ascent"] * text_scale)
     if not overlay :
-        draw.show_text(spec["title"].encode("utf8"))
+        draw.show_text(spec["title"])
     #end if
     for i in range(0, len(spec["tracks"])) :
         track = spec["tracks"][i]
@@ -656,7 +657,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     #end for
     srcpixsurface.flush()
     # rescale to dstdimensions
-    dstpixbuf = array.array("B", '\0' * dstdimensions["height"] * dststride)
+    dstpixbuf = array.array("B", b'\0' * dstdimensions["height"] * dststride)
     dstpixsurface = cairo.ImageSurface.create_for_data \
       (
         dstpixbuf,
@@ -865,7 +866,7 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
                         "src" : saxutils.quoteattr(src["path"]),
                     }
               )
-            if src.has_key("chapters") :
+            if "chapters" in src :
                 out.write \
                   (
                         " chapters=%(chapters)s"
@@ -937,7 +938,7 @@ def generate_simpleplay_xml(spec, parent_dir, out) :
                     "src" : saxutils.quoteattr(src["path"]),
                 }
           )
-        if src.has_key("chapters") :
+        if "chapters" in src :
             out.write \
               (
                     " chapters=%(chapters)s"
@@ -1058,8 +1059,8 @@ if do_author :
     for dir in (os.path.join(dstdir, "AUDIO_TS"), dstdir) : # expecting these to be empty if they exist
         try :
             os.rmdir(dir)
-        except OSError, (ErrNo, Msg) :
-            if ErrNo != errno.ENOENT :
+        except OSError as err :
+            if err.errno != errno.ENOENT :
                 raise
             #end if
         #end try
