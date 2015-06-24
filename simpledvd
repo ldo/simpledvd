@@ -549,15 +549,9 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     each track if overlay."""
     srcdimensions = working_sizes[spec["aspect"]]["dimensions"]
     dstdimensions = video_formats[spec["format"]]["dimensions"]
-    if overlay :
-      # generate bilevel image
-      # can't find format_stride_for_width? TBD
-        srcstride = (srcdimensions.x + 31 - 1) // 32 * 4
-        dststride = (dstdimensions.x + 31 - 1) // 32 * 4
-    else :
-        srcstride = srcdimensions.x * 4
-        dststride = dstdimensions.x * 4
-    #end if
+    format = (CAIRO.FORMAT_ARGB32, CAIRO.FORMAT_A1)[overlay]
+    srcstride = qah.ImageSurface.format_stride_for_width(format, srcdimensions.x)
+    dststride = qah.ImageSurface.format_stride_for_width(format, dstdimensions.x)
     srcpixbuf = array.array("B", b'\0' * srcdimensions.y * srcstride)
     srcpixsurface = qah.ImageSurface.create_for_array \
       (
