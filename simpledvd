@@ -160,7 +160,13 @@ png.png_create_write_struct.restype = ct.c_void_p
 png.png_create_info_struct.restype = ct.c_void_p
 
 class PNG :
-    """constants and types copied from png.h"""
+    "constants and types copied from png.h."
+
+    # General ctypes gotcha: when passing addresses of ctypes-constructed objects
+    # to routine calls, do not construct the objects directly in the call. Otherwise
+    # the refcount goes to 0 before the routine is actually entered, and the object
+    # can get prematurely disposed. Always store the object reference into a local
+    # variable, and pass the value of the variable instead.
 
     COLOR_MASK_PALETTE = 1
     COLOR_MASK_COLOR = 2
@@ -194,6 +200,9 @@ class PNG :
             ]
     #end color
 
+    png_rw_ptr = ct.CFUNCTYPE(None, ct.c_void_p, ct.c_void_p, ct.c_size_t)
+    png_flush_ptr = ct.CFUNCTYPE(None, ct.c_void_p)
+
 #end PNG
 
 def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfilename) :
@@ -211,14 +220,14 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
             tofile.write(data[i])
         #end for
     #end write_data
-    cb_write_data = ct.CFUNCTYPE(None, ct.c_void_p, ct.c_void_p, ct.c_size_t)(write_data)
+    cb_write_data = PNG.png_rw_ptr(write_data)
       # need to keep a reference to this to stop it being garbage-collected
 
     def flush_write(png_ptr) :
         # never called?
         tofile.flush()
     #end flush_write
-    cb_flush_write = ct.CFUNCTYPE(None, ct.c_void_p)(flush_write)
+    cb_flush_write = PNG.png_flush_ptr(flush_write)
       # need to keep a reference to this to stop it being garbage-collected
 
 #begin write_bilevel_png
