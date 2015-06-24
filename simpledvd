@@ -234,7 +234,6 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
     tofile = open(destfilename, "wb")
     write_struct = png.png_create_write_struct(b"1.2.50", None, None, None)
     infop = png.png_create_info_struct(write_struct)
-    sys.stderr.write("done creating structs, write_struct = %s, infop = %s\n" % (write_struct, infop)) # debug
     png.png_set_write_fn \
       (
         write_struct,
@@ -274,14 +273,11 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
         1, # num_trans
         None # trans_values
       )
-    sys.stderr.write("done set info chunks\n") # debug
     png.png_write_info(write_struct, infop)
-    sys.stderr.write("done write info\n") # debug
     if sys.byteorder != "big" :
         png.png_set_packswap(write_struct)
           # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
     #end if
-    sys.stderr.write("about to write rows\n") # debug
     for i in range(0, dimensions.y) :
         png.png_write_row \
           (
@@ -562,8 +558,6 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     #end if
     draw.font_matrix = Matrix.identity()
     font_extents = draw.font_extents
-    sys.stderr.write("font extents: %s\n" % repr(font_extents)) # debug
-    sys.stderr.write("font matrix: %s\n" % draw.font_matrix) # debug
     linespace_factor = 1.2
     nr_lines = \
         (
@@ -575,7 +569,6 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         )
     text_height = srcdimensions.y / linespace_factor / nr_lines
     text_scale = text_height / font_extents.height
-    sys.stderr.write("new text height:: %.2f\n" % text_height) # debug
     font_matrix = Matrix.scale(text_scale)
       # scale to height to begin with
     draw.font_matrix = font_matrix
@@ -590,7 +583,6 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
             font_matrix = Matrix.scale(text_scale)
               # scale to height to begin with
             draw.font_matrix = font_matrix
-            sys.stderr.write("new font matrix: %s\n" % draw.font_matrix) # debug
         #end if
     #end for
     draw.move_to((indent, text_height + font_extents.ascent * text_scale))
@@ -614,12 +606,10 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
                         button_extents.height, # height
                     )
               )
-            sys.stderr.write("button %d extents %s button %s\n" % (i + 1, repr(button_extents), repr(track["button"]))) # debug
             draw.show_text(spec["item_mark"])
         else :
             draw.move_to((indent * 2, v))
             draw.show_text(track["title"])
-            sys.stderr.write("new font matrix: %s\n" % draw.font_matrix) # debug
         #end if
     #end for
     srcpixsurface.flush()
@@ -955,7 +945,6 @@ create_temp_dir()
 spec = parse_contents_spec(args[0])
 dstdir = args[1]
 os.environ["VIDEO_FORMAT"] = spec["format"] # for newer versions of DVDAuthor
-sys.stderr.write("spec contents: %s\n" % repr(spec)) # debug
 
 file_names = \
     { # names to use for temp image/xml/movie files
