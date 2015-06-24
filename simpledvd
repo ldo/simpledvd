@@ -268,52 +268,18 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
     sys.stderr.write("done set info chunks\n") # debug
     png.png_write_info(write_struct, infop)
     sys.stderr.write("done write info\n") # debug
-    rowlen = (dimensions.x + 7) // 8
-    if False :
-        imagebuf = ct.create_string_buffer(dimensions.y * rowlen)
-        for i in range(0, dimensions.y) :
-            for j in range(0, rowlen) :
-                b = ct.cast(pixels.buffer_info()[0] + i * stride + j, ct.POINTER(bytebits))[0]
-                # ordering of pixels within byte is endian-specific in Cairo,
-                # but not in libpng
-                imagebuf[i * rowlen + j] = chr \
-                    (
-                        b.b7
-                    |
-                        b.b6 << 1
-                    |
-                        b.b5 << 2
-                    |
-                        b.b4 << 3
-                    |
-                        b.b3 << 4
-                    |
-                        b.b2 << 5
-                    |
-                        b.b1 << 6
-                    |
-                        b.b0 << 7
-                    )
-            #end for
-        #end for
-        imagearr = \
-            (ct.c_void_p * dimensions.y) \
-                (*(ct.addressof(imagebuf) + rowlen * i for i in range(0, dimensions.y)))
-        png.png_write_image(write_struct, ct.addressof(imagearr))
-    else :
-        if sys.byteorder != "big" :
-            png.png_set_packswap(write_struct)
-              # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
-        #end if
-        sys.stderr.write("about to write rows\n") # debug
-        for i in range(0, dimensions.y) :
-            png.png_write_row \
-              (
-                write_struct,
-                pixels.buffer_info()[0] + i * stride
-              )
-        #end for
+    if sys.byteorder != "big" :
+        png.png_set_packswap(write_struct)
+          # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
     #end if
+    sys.stderr.write("about to write rows\n") # debug
+    for i in range(0, dimensions.y) :
+        png.png_write_row \
+          (
+            write_struct,
+            pixels.buffer_info()[0] + i * stride
+          )
+    #end for
     png.png_write_end(write_struct, infop)
     write_struct_ptr = ct.c_size_t(write_struct)
     infop_ptr = ct.c_size_t(infop)
