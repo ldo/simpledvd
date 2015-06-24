@@ -12,7 +12,7 @@
 #
 # The XML file looks like this:
 #
-# <simpledvd aspect=aspectratio format=format title=title
+# <simpledvd aspect=aspectratio format=format title=title [font=fontspec]
 #     fgcolor=fgcolor bgcolor=bgcolor highlightcolor=highlightcolor selectcolor=selectcolor
 #     item_mark=item_mark>
 #     <track title=tracktitle src=trackfile [chapters=chapters]/>
@@ -24,13 +24,15 @@
 # </simpledvd>
 #
 # where aspectratio can be either "4:3" or "16:9", format is "pal" or "ntsc",
-# title is the title to appear at the top of the menu, fgcolor is the colour to
-# use for the menu text, bgcolor is the colour of the menu background, highlightcolor
-# the colour to use for indicating the currently-highlighted menu item (as changed by
-# using the menu navigation buttons on the DVD player remote), and selectcolor the
-# colour in which to momentarily display the item when the OK/Enter key is hit on the
-# remote before acting on the menu selection (some players may not show this). item_mark
-# is the mark to display next to the currently-highlighted menu item.
+# title is the title to appear at the top of the menu, fontspec is the
+# Fontconfig font spec for the font to use, fgcolor is the colour to use for the
+# menu text, bgcolor is the colour of the menu background, highlightcolor the
+# colour to use for indicating the currently-highlighted menu item (as changed
+# by using the menu navigation buttons on the DVD player remote), and
+# selectcolor the colour in which to momentarily display the item when the
+# OK/Enter key is hit on the remote before acting on the menu selection (some
+# players may not show this). item_mark is the mark to display next to the
+# currently-highlighted menu item.
 #
 # Alternatively, the XML can take the following simplified form:
 #
@@ -41,14 +43,15 @@
 # where there is no menu and only a single track, which will start playing as soon
 # as the disc is inserted in the player.
 #
-# Colours are specified in standard HTML format; either as three pairs of hex digits
-# "#rrggbb" or as one of the predefined colour names as listed in the HTML 4.01 spec.
+# Colours are specified in standard HTML format; either as three pairs of hex
+# digits "#rrggbb" or as one of the predefined colour names as listed in the
+# HTML 4.01 spec.
 #
 # Each track is defined by a "track" directive, where tracktitle is the text to
-# show in the menu for this track. The track contents can be a single file specified as
-# the src attribute, or as a number of files listed in child "src" tags.  Each
-# trackfile is the name of an MPEG file that actually contains the track contents, ready
-# for feeding to dvdauthor.
+# show in the menu for this track. The track contents can be a single file
+# specified as the src attribute, or as a number of files listed in child "src"
+# tags.  Each trackfile is the name of an MPEG file that actually contains the
+# track contents, ready for feeding to dvdauthor.
 #
 # Example:
 # <simpledvd
@@ -378,6 +381,7 @@ def parse_contents_spec(filename) :
     """reads and parses the contents of filename as XML, and returns
     the interpreted results as a dictionary, as follows:
         aspect -- the aspect ratio, either "16:9" or "4:3"
+        font -- the Fontconfig font spec
         format -- the video format, either "ntsc" or "pal"
         title -- the title for the menu
         fgcolor -- the foreground colour to use
@@ -409,7 +413,7 @@ def parse_contents_spec(filename) :
                 "format" : tuple(video_formats.keys()),
             }
         colors = ("fgcolor", "bgcolor", "highlightcolor", "selectcolor")
-        menuattrs = ("title", "item_mark")
+        menuattrs = ("item_mark", "title")
         result["makemenu"] = len(set(menuattrs + colors) & set(attrs.keys())) != 0
         if result["makemenu"] :
             require_attrs(tag, attrs, tuple(required.keys()) + menuattrs + colors)
@@ -430,6 +434,9 @@ def parse_contents_spec(filename) :
             for key in colors :
                 result[key] = parse_color(attrs[key])
             #end for
+            if "font" in attrs :
+                result["font"] = attrs["font"]
+            #end if
         #end if
         result["tracks"] = []
     #end handle_main_def
@@ -573,8 +580,11 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     else :
         draw.source_colour = qah.Colour(*(forecolor + (1,)))
     #end if
-    draw.select_font_face("sans-serif", CAIRO.FONT_SLANT_NORMAL, CAIRO.FONT_WEIGHT_NORMAL)
-      # TODO: let user specify Fontconfig font spec
+    if "font" in spec :
+        draw.font_face = qah.FontFace.create_for_pattern(spec["font"])
+    else :
+        draw.select_font_face("sans-serif", CAIRO.FONT_SLANT_NORMAL, CAIRO.FONT_WEIGHT_NORMAL)
+    #end if
     draw.font_matrix = Matrix.identity()
     font_extents = draw.font_extents
     sys.stderr.write("font extents: %s\n" % repr(font_extents)) # debug
