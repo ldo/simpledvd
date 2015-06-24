@@ -80,10 +80,13 @@ import shutil
 import xml.parsers.expat as expat
 import xml.sax.saxutils as saxutils
 import ctypes as ct
-import cairo
 import subprocess
 import tempfile
 import getopt
+import qahirah as qah # get Qahirah from <https://github.com/ldo/qahirah>
+from qahirah import \
+    CAIRO, \
+    Matrix
 
 #+
 # Miscellaneous useful stuff
@@ -544,7 +547,7 @@ def parse_contents_spec(filename) :
 
 def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     """renders the menu image into a PNG file named destfilename. overlay
-    is True for the selected and highlighted versions, false for the
+    is True for the selected and highlighted versions, False for the
     normal (background) image. Also fills in button dimensions for
     each track if overlay."""
     srcdimensions = working_sizes[spec["aspect"]]
@@ -559,36 +562,32 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         dststride = dstdimensions["width"] * 4
     #end if
     srcpixbuf = array.array("B", b'\0' * srcdimensions["height"] * srcstride)
-    srcpixsurface = cairo.ImageSurface.create_for_data \
+    srcpixsurface = qah.ImageSurface.create_for_array \
       (
-        srcpixbuf,
-        (cairo.FORMAT_ARGB32, cairo.FORMAT_A1)[overlay],
-        srcdimensions["width"],
-        srcdimensions["height"],
-        srcstride
+        arr = srcpixbuf,
+        format = (CAIRO.FORMAT_ARGB32, CAIRO.FORMAT_A1)[overlay],
+        dimensions = (srcdimensions["width"], srcdimensions["height"]),
+        stride = srcstride
       )
-    draw = cairo.Context(srcpixsurface)
+    draw = qah.Context.create(srcpixsurface)
     if overlay :
-        draw.set_source_rgba(0, 0, 0, 0)
+        draw.source_colour = qah.Colour.grey(0, 0)
     else :
-        draw.set_source_rgb(*backcolor)
+        draw.source_colour = qah.Colour(*(backcolor + (1,)))
     #end if
-    draw.rectangle(0, 0, srcdimensions["width"], srcdimensions["height"])
+    draw.rectangle(qah.Rect(0, 0, srcdimensions["width"], srcdimensions["height"]))
     draw.fill()
     if overlay :
-        draw.set_source_rgba(0, 0, 0, 1)
+        draw.source_colour = qah.Colour.grey(0, 1)
     else :
-        draw.set_source_rgb(*forecolor)
+        draw.source_colour = qah.Colour(*(forecolor + (1,)))
     #end if
-    draw.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-      # how to do more than toy font support in PyCairo?
-    draw.set_font_matrix(cairo.Matrix())
-    font_extents = dict(zip(
-        ("ascent", "descent", "height", "max_x_advance", "max_y_advance"),
-        draw.font_extents()
-    ))
+    draw.select_font_face("sans-serif", CAIRO.FONT_SLANT_NORMAL, CAIRO.FONT_WEIGHT_NORMAL)
+      # TODO: let user specify Fontconfig font spec
+    draw.font_matrix = Matrix.identity()
+    font_extents = draw.font_extents
     sys.stderr.write("font extents: %s\n" % repr(font_extents)) # debug
-    sys.stderr.write("font matrix: %s\n" % draw.get_font_matrix()) # debug
+    sys.stderr.write("font matrix: %s\n" % draw.font_matrix) # debug
     linespace_factor = 1.2
     nr_lines = \
         (
@@ -599,84 +598,79 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
             2 # top and bottom margins
         )
     text_height = srcdimensions["height"] / linespace_factor / nr_lines
-    text_scale = text_height / font_extents["height"]
+    text_scale = text_height / font_extents.height
     sys.stderr.write("new text height:: %.2f\n" % text_height) # debug
-    font_matrix = cairo.Matrix()
-    font_matrix.scale(text_scale, text_scale)
+    font_matrix = Matrix.scale(text_scale)
       # scale to height to begin with
-    draw.set_font_matrix(font_matrix)
-    indent = font_extents["max_x_advance"] * text_scale
+    draw.font_matrix = font_matrix
+    indent = font_extents.max_x_advance * text_scale
     for i in range(0, len(spec["tracks"])) :
         # check widths of titles to ensure they don't run off the end
         track = spec["tracks"][i]
-        title_extents = dict(zip(
-            ("x_bearing", "y_bearing", "width", "height", "x_advance", "y_advance"),
-            draw.text_extents(track["title"])
-        ))
-        if indent * 2 + title_extents["width"] > srcdimensions["width"] - indent :
-            text_scale = text_scale * (srcdimensions["width"] - indent) / (indent * 2 + title_extents["width"])
-            indent = font_extents["max_x_advance"] * text_scale
-            font_matrix = cairo.Matrix()
-            font_matrix.scale(text_scale, text_scale)
+        title_extents = draw.text_extents(track["title"])
+        if indent * 2 + title_extents.width > srcdimensions["width"] - indent :
+            text_scale = text_scale * (srcdimensions["width"] - indent) / (indent * 2 + title_extents.width)
+            indent = font_extents.max_x_advance * text_scale
+            font_matrix = Matrix.scale(text_scale)
               # scale to height to begin with
-            draw.set_font_matrix(font_matrix)
-            sys.stderr.write("new font matrix: %s\n" % draw.get_font_matrix()) # debug
+            draw.font_matrix = font_matrix
+            sys.stderr.write("new font matrix: %s\n" % draw.font_matrix) # debug
         #end if
     #end for
-    draw.move_to(indent, text_height + font_extents["ascent"] * text_scale)
+    draw.move_to((indent, text_height + font_extents.ascent * text_scale))
     if not overlay :
         draw.show_text(spec["title"])
     #end if
     for i in range(0, len(spec["tracks"])) :
         track = spec["tracks"][i]
-        v = text_height * (i + 2) + font_extents["ascent"] * text_scale
+        v = text_height * (i + 2) + font_extents.ascent * text_scale
         if overlay :
-            draw.move_to(indent, v)
-            button_extents = dict(zip(
-                ("x_bearing", "y_bearing", "width", "height", "x_advance", "y_advance"),
-                draw.text_extents(spec["item_mark"])
-            ))
+            draw.move_to((indent, v))
+            button_extents = draw.text_extents(spec["item_mark"])
             track["button"] = tuple \
               (
                     int(round(i))
                 for i in
                     (
-                        indent + button_extents["x_bearing"], # x
-                        v + button_extents["y_bearing"], # y
-                        button_extents["width"], # width
-                        button_extents["height"], # height
+                        indent + button_extents.x_bearing, # x
+                        v + button_extents.y_bearing, # y
+                        button_extents.width, # width
+                        button_extents.height, # height
                     )
               )
             sys.stderr.write("button %d extents %s button %s\n" % (i + 1, repr(button_extents), repr(track["button"]))) # debug
             draw.show_text(spec["item_mark"])
         else :
-            draw.move_to(indent * 2, v)
+            draw.move_to((indent * 2, v))
             draw.show_text(track["title"])
-            sys.stderr.write("new font matrix: %s\n" % draw.get_font_matrix()) # debug
+            sys.stderr.write("new font matrix: %s\n" % draw.font_matrix) # debug
         #end if
     #end for
     srcpixsurface.flush()
     # rescale to dstdimensions
     dstpixbuf = array.array("B", b'\0' * dstdimensions["height"] * dststride)
-    dstpixsurface = cairo.ImageSurface.create_for_data \
+    dstpixsurface = qah.ImageSurface.create_for_array \
       (
-        dstpixbuf,
-        (cairo.FORMAT_ARGB32, cairo.FORMAT_A1)[overlay],
-        dstdimensions["width"],
-        dstdimensions["height"],
-        dststride
+        arr = dstpixbuf,
+        format = (CAIRO.FORMAT_ARGB32, CAIRO.FORMAT_A1)[overlay],
+        dimensions = (dstdimensions["width"], dstdimensions["height"]),
+        stride = dststride
       )
-    draw = cairo.Context(dstpixsurface)
-    srcpixpat = cairo.SurfacePattern(srcpixsurface)
-    patmatrix = cairo.Matrix()
-    patmatrix.scale \
-      (
-        srcdimensions["width"] / dstdimensions["width"],
-        srcdimensions["height"] / dstdimensions["height"]
-      )
-    srcpixpat.set_matrix(patmatrix)
-    draw.set_source(srcpixpat)
-    draw.paint()
+    (qah.Context.create(dstpixsurface)
+        .set_source
+          (
+            qah.Pattern.create_for_surface(srcpixsurface)
+                .set_matrix
+                  (
+                    Matrix.scale \
+                      ((
+                        srcdimensions["width"] / dstdimensions["width"],
+                        srcdimensions["height"] / dstdimensions["height"]
+                      ))
+                  )
+          )
+        .paint()
+    )
     dstpixsurface.flush()
     if overlay :
         write_bilevel_png \
