@@ -103,22 +103,15 @@ def shell_escape(Arg) :
           # Need to catch anything that might be meaningful to shell
 #end shell_escape
 
-def check_child_status(status) :
-    if status != 0 :
-        sys.stderr.write(" child terminated with status %04x\n" % status)
-    #end if
-#end check_child_status
-
 def runcmd(cmd) :
-    """runs a command in Bash and waits for it complete."""
+    "runs a command in Bash and waits for it complete."
     sys.stderr.write("runcmd: %s\n" % cmd) # debug
-    child = subprocess.Popen \
+    subprocess.check_call \
       (
         args = ("bash", "-c", cmd),
         close_fds = True,
         shell = False
       )
-    check_child_status(child.wait())
 #end runcmd
 
 #+
@@ -1042,14 +1035,13 @@ if spec["makemenu"] :
 #end if
 
 if spec["makemenu"] and do_spumux :
-    child = subprocess.Popen \
+    subprocess.check_call \
       (
         args = ("spumux", "-m", "dvd", os.path.join(temp_dir, file_names["menu_control"])),
         stdin = open(os.path.join(temp_dir, file_names["menu_background"]), "r"),
         stdout = open(os.path.join(temp_dir, file_names["menu_movie"]), "w"),
         close_fds = True
       )
-    check_child_status(child.wait())
 #end if
 control = open(os.path.join(temp_dir, file_names["author_control"]), "w")
 if spec["makemenu"] :
@@ -1072,12 +1064,11 @@ if do_author :
             #end if
         #end try
     #end for
-    child = subprocess.Popen \
+    subprocess.check_call \
       (
         args = ("dvdauthor", "-o", dstdir, "-x", os.path.join(temp_dir, file_names["author_control"])),
         close_fds = True
       )
-    check_child_status(child.wait())
 #end if
 
 if not keep_temps :
