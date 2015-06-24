@@ -86,7 +86,8 @@ import getopt
 import qahirah as qah # get Qahirah from <https://github.com/ldo/qahirah>
 from qahirah import \
     CAIRO, \
-    Matrix
+    Matrix, \
+    Vector
 
 #+
 # Miscellaneous useful stuff
@@ -124,14 +125,12 @@ video_formats = \
     {
         "ntsc" :
             {
-                "width" : 720,
-                "height" : 480,
+                "dimensions" : Vector(720, 480),
                 "ffmpeg_preset" : "ntsc-dvd",
             },
         "pal" :
             {
-                "width" : 720,
-                "height" : 576,
+                "dimensions" : Vector(720, 576),
                 "ffmpeg_preset" : "pal-dvd",
             },
     }
@@ -139,14 +138,12 @@ working_sizes = \
     { # indexed by aspect ratio
         "4:3" :
             {
-                "width" : 768,
-                "height" : 576,
+                "dimensions" : Vector(768, 576),
                 "ffmpeg_aspect" : "4:3",
             },
         "16:9" :
             {
-                "width" : 1024,
-                "height" : 576,
+                "dimensions" : Vector(1024, 576),
                 "ffmpeg_aspect" : "16:9",
             },
     }
@@ -196,8 +193,8 @@ class PNG :
 
 #end PNG
 
-def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destfilename) :
-    """writes the buffer object pixels, consisting of width * height 1-bit pixels,
+def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfilename) :
+    """writes the buffer object pixels, consisting of dimensions.x * dimensions.y 1-bit pixels,
     where 0 represents backcolor and 1 represent forecolor (both (r, g, b) tuples)
     to the file named destfilename in PNG format."""
 
@@ -238,8 +235,8 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
       (
         write_struct,
         infop,
-        width,
-        height,
+        dimensions.x,
+        dimensions.y,
         1, # bit_depth
         PNG.COLOR_TYPE_PALETTE, # color_type
         PNG.INTERLACE_NONE, # interlace_type
@@ -268,10 +265,10 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
     sys.stderr.write("done set info chunks\n") # debug
     png.png_write_info(write_struct, infop)
     sys.stderr.write("done write info\n") # debug
-    rowlen = (width + 7) // 8
+    rowlen = (dimensions.x + 7) // 8
     if False :
-        imagebuf = ct.create_string_buffer(height * rowlen)
-        for i in range(0, height) :
+        imagebuf = ct.create_string_buffer(dimensions.y * rowlen)
+        for i in range(0, dimensions.y) :
             for j in range(0, rowlen) :
                 b = ct.cast(pixels.buffer_info()[0] + i * stride + j, ct.POINTER(bytebits))[0]
                 # ordering of pixels within byte is endian-specific in Cairo,
@@ -297,8 +294,8 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
             #end for
         #end for
         imagearr = \
-            (ct.c_void_p * height) \
-                (*(ct.addressof(imagebuf) + rowlen * i for i in range(0, height)))
+            (ct.c_void_p * dimensions.y) \
+                (*(ct.addressof(imagebuf) + rowlen * i for i in range(0, dimensions.y)))
         png.png_write_image(write_struct, ct.addressof(imagearr))
     else :
         if sys.byteorder != "big" :
@@ -306,7 +303,7 @@ def write_bilevel_png(pixels, width, height, stride, backcolor, forecolor, destf
               # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
         #end if
         sys.stderr.write("about to write rows\n") # debug
-        for i in range(0, height) :
+        for i in range(0, dimensions.y) :
             png.png_write_row \
               (
                 write_struct,
@@ -550,23 +547,23 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     is True for the selected and highlighted versions, False for the
     normal (background) image. Also fills in button dimensions for
     each track if overlay."""
-    srcdimensions = working_sizes[spec["aspect"]]
-    dstdimensions = video_formats[spec["format"]]
+    srcdimensions = working_sizes[spec["aspect"]]["dimensions"]
+    dstdimensions = video_formats[spec["format"]]["dimensions"]
     if overlay :
       # generate bilevel image
-      # can't find format_stride_for_width?
-        srcstride = (srcdimensions["width"] + 31 - 1) // 32 * 4
-        dststride = (dstdimensions["width"] + 31 - 1) // 32 * 4
+      # can't find format_stride_for_width? TBD
+        srcstride = (srcdimensions.x + 31 - 1) // 32 * 4
+        dststride = (dstdimensions.x + 31 - 1) // 32 * 4
     else :
-        srcstride = srcdimensions["width"] * 4
-        dststride = dstdimensions["width"] * 4
+        srcstride = srcdimensions.x * 4
+        dststride = dstdimensions.x * 4
     #end if
-    srcpixbuf = array.array("B", b'\0' * srcdimensions["height"] * srcstride)
+    srcpixbuf = array.array("B", b'\0' * srcdimensions.y * srcstride)
     srcpixsurface = qah.ImageSurface.create_for_array \
       (
         arr = srcpixbuf,
         format = (CAIRO.FORMAT_ARGB32, CAIRO.FORMAT_A1)[overlay],
-        dimensions = (srcdimensions["width"], srcdimensions["height"]),
+        dimensions = srcdimensions,
         stride = srcstride
       )
     draw = qah.Context.create(srcpixsurface)
@@ -575,7 +572,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     else :
         draw.source_colour = qah.Colour(*(backcolor + (1,)))
     #end if
-    draw.rectangle(qah.Rect(0, 0, srcdimensions["width"], srcdimensions["height"]))
+    draw.rectangle(qah.Rect.from_dimensions(srcdimensions))
     draw.fill()
     if overlay :
         draw.source_colour = qah.Colour.grey(0, 1)
@@ -597,7 +594,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         +
             2 # top and bottom margins
         )
-    text_height = srcdimensions["height"] / linespace_factor / nr_lines
+    text_height = srcdimensions.y / linespace_factor / nr_lines
     text_scale = text_height / font_extents.height
     sys.stderr.write("new text height:: %.2f\n" % text_height) # debug
     font_matrix = Matrix.scale(text_scale)
@@ -608,8 +605,8 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         # check widths of titles to ensure they don't run off the end
         track = spec["tracks"][i]
         title_extents = draw.text_extents(track["title"])
-        if indent * 2 + title_extents.width > srcdimensions["width"] - indent :
-            text_scale = text_scale * (srcdimensions["width"] - indent) / (indent * 2 + title_extents.width)
+        if indent * 2 + title_extents.width > srcdimensions.x - indent :
+            text_scale = text_scale * (srcdimensions.x - indent) / (indent * 2 + title_extents.width)
             indent = font_extents.max_x_advance * text_scale
             font_matrix = Matrix.scale(text_scale)
               # scale to height to begin with
@@ -648,12 +645,12 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     #end for
     srcpixsurface.flush()
     # rescale to dstdimensions
-    dstpixbuf = array.array("B", b'\0' * dstdimensions["height"] * dststride)
+    dstpixbuf = array.array("B", b'\0' * dstdimensions.y * dststride)
     dstpixsurface = qah.ImageSurface.create_for_array \
       (
         arr = dstpixbuf,
         format = (CAIRO.FORMAT_ARGB32, CAIRO.FORMAT_A1)[overlay],
-        dimensions = (dstdimensions["width"], dstdimensions["height"]),
+        dimensions = dstdimensions,
         stride = dststride
       )
     (qah.Context.create(dstpixsurface)
@@ -662,11 +659,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
             qah.Pattern.create_for_surface(srcpixsurface)
                 .set_matrix
                   (
-                    Matrix.scale \
-                      ((
-                        srcdimensions["width"] / dstdimensions["width"],
-                        srcdimensions["height"] / dstdimensions["height"]
-                      ))
+                    Matrix.scale(srcdimensions / dstdimensions)
                   )
           )
         .paint()
@@ -676,8 +669,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         write_bilevel_png \
           (
             pixels = dstpixbuf,
-            width = dstdimensions["width"],
-            height = dstdimensions["height"],
+            dimensions = dstdimensions,
             stride = dststride,
             backcolor = backcolor,
             forecolor = forecolor,
@@ -720,9 +712,9 @@ def map_button_x(x, spec) :
         (
             x
         /
-            working_sizes[spec["aspect"]]["width"]
+            working_sizes[spec["aspect"]]["dimensions"].x
         *
-            video_formats[spec["format"]]["width"]
+            video_formats[spec["format"]]["dimensions"].x
         ))
 #end map_button_x
 
@@ -732,9 +724,9 @@ def map_button_y(y, spec) :
             int(round(
                     y
                 /
-                    working_sizes[spec["aspect"]]["height"]
+                    working_sizes[spec["aspect"]]["dimensions"].y
                 *
-                    video_formats[spec["format"]]["height"]
+                    video_formats[spec["format"]]["dimensions"].y
             ))
         &
             ~1
@@ -797,8 +789,8 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
             {
                 "format" : spec["format"],
                 "aspect" : spec["aspect"],
-                "width" : video_formats[spec["format"]]["width"],
-                "height" : video_formats[spec["format"]]["height"],
+                "width" : video_formats[spec["format"]]["dimensions"].x,
+                "height" : video_formats[spec["format"]]["dimensions"].y,
             }
       )
     out.write("<dvdauthor>\n")
@@ -917,8 +909,8 @@ def generate_simpleplay_xml(spec, parent_dir, out) :
             {
                 "format" : spec["format"],
                 "aspect" : spec["aspect"],
-                "width" : video_formats[spec["format"]]["width"],
-                "height" : video_formats[spec["format"]]["height"],
+                "width" : video_formats[spec["format"]]["dimensions"].x,
+                "height" : video_formats[spec["format"]]["dimensions"].y,
             }
       )
     track = spec["tracks"][0] # only track
