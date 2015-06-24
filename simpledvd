@@ -207,7 +207,7 @@ class PNG :
 
 def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfilename) :
     """writes the buffer object pixels, consisting of dimensions.x * dimensions.y 1-bit pixels,
-    where 0 represents backcolor and 1 represent forecolor (both (r, g, b) tuples)
+    where 0 represents backcolor and 1 represent forecolor (both qahirah.Colour values)
     to the file named destfilename in PNG format."""
 
     class bytebits(ct.Structure) :
@@ -320,7 +320,7 @@ def cleanup_temp_dir() :
 
 def parse_color(color) :
     """parses color as either a standard HTML colour name or #rrggbb. Returns
-    an (r, g, b) tuple with each component in the range [0.0 .. 1.0]."""
+    a qahirah.Colour value."""
     if color[0] == "#" and len(color) == 7 :
         result = color[1:]
     else :
@@ -345,7 +345,7 @@ def parse_color(color) :
                 "aqua" : "00FFFF",
             }[color.lower()]
     #end if
-    return tuple(int(result[i * 2 : i * 2 + 2], 16) / 255 for i in range(0, 3))
+    return qah.Colour(*(tuple(int(result[i * 2 : i * 2 + 2], 16) / 255 for i in range(0, 3)) + (1,)))
 #end parse_color
 
 def parse_contents_spec(filename) :
@@ -362,8 +362,7 @@ def parse_contents_spec(filename) :
         tracks -- a list of the tracks in order, each being a dictionary containing
                 title -- the name to show on the menu
                 src -- the name of the input video file for the track
-    All colours are expressed as (r, g, b) tuples where each component is an integer
-    in [0 .. 255].
+    All colours are expressed as qahirah.Colour values.
     """
 
     parse_state = {"nest" : 0, "main_seen" : False}
@@ -542,14 +541,14 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     if overlay :
         draw.source_colour = qah.Colour.grey(0, 0)
     else :
-        draw.source_colour = qah.Colour(*(backcolor + (1,)))
+        draw.source_colour = backcolor
     #end if
     draw.rectangle(qah.Rect.from_dimensions(srcdimensions))
     draw.fill()
     if overlay :
         draw.source_colour = qah.Colour.grey(0, 1)
     else :
-        draw.source_colour = qah.Colour(*(forecolor + (1,)))
+        draw.source_colour = forecolor
     #end if
     if "font" in spec :
         draw.font_face = qah.FontFace.create_for_pattern(spec["font"])
