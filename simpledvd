@@ -168,6 +168,8 @@ class PNG :
     # can get prematurely disposed. Always store the object reference into a local
     # variable, and pass the value of the variable instead.
 
+    LIBPNG_VER_STRING = b"1.2.50"
+
     COLOR_MASK_PALETTE = 1
     COLOR_MASK_COLOR = 2
     COLOR_MASK_ALPHA = 4
@@ -232,7 +234,7 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
 
 #begin write_bilevel_png
     tofile = open(destfilename, "wb")
-    write_struct = png.png_create_write_struct(b"1.2.50", None, None, None)
+    write_struct = png.png_create_write_struct(PNG.LIBPNG_VER_STRING, None, None, None)
     infop = png.png_create_info_struct(write_struct)
     png.png_set_write_fn \
       (
