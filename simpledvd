@@ -994,8 +994,8 @@ if spec["makemenu"] and do_spumux :
     subprocess.check_call \
       (
         args = ("spumux", "-m", "dvd", os.path.join(temp_dir, file_names["menu_control"])),
-        stdin = open(os.path.join(temp_dir, file_names["menu_background"]), "r"),
-        stdout = open(os.path.join(temp_dir, file_names["menu_movie"]), "w"),
+        stdin = open(os.path.join(temp_dir, file_names["menu_background"]), "rb"),
+        stdout = open(os.path.join(temp_dir, file_names["menu_movie"]), "wb"),
         close_fds = True
       )
 #end if
