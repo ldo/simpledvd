@@ -557,7 +557,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     else :
         draw.select_font_face("sans-serif", CAIRO.FONT_SLANT_NORMAL, CAIRO.FONT_WEIGHT_NORMAL)
     #end if
-    draw.font_matrix = Matrix.identity()
+    draw.font_matrix = Matrix.identity
     font_extents = draw.font_extents
     linespace_factor = 1.2
     nr_lines = \
