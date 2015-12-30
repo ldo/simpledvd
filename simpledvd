@@ -213,12 +213,12 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
     to the file named destfilename in PNG format."""
 
     class bytebits(ct.Structure) :
-        _fields_ = [("b%d" % i, ct.c_uint, 1) for i in range(0, 8)]
+        _fields_ = [("b%d" % i, ct.c_uint, 1) for i in range(8)]
     #end bytebits
 
     def write_data(png_ptr, data, datalen) :
         data = ct.cast(data, ct.POINTER(ct.c_char))
-        for i in range(0, datalen) :
+        for i in range(datalen) :
             tofile.write(data[i])
         #end for
     #end write_data
@@ -262,8 +262,8 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
         infop,
         (PNG.color * 2)
             (
-                PNG.color(*(int(backcolor[i] * 255) for i in range(0, 3))),
-                PNG.color(*(int(forecolor[i] * 255) for i in range(0, 3))),
+                PNG.color(*(int(backcolor[i] * 255) for i in range(3))),
+                PNG.color(*(int(forecolor[i] * 255) for i in range(3))),
             ),
         2 # num_palette
       )
@@ -280,7 +280,7 @@ def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfile
         png.png_set_packswap(write_struct)
           # libpng's arrangement of bits within byte is endian-dependent, Cairo's is not
     #end if
-    for i in range(0, dimensions.y) :
+    for i in range(dimensions.y) :
         png.png_write_row \
           (
             write_struct,
@@ -347,7 +347,7 @@ def parse_color(color) :
                 "aqua" : "00FFFF",
             }[color.lower()]
     #end if
-    return qah.Colour(*(tuple(int(result[i * 2 : i * 2 + 2], 16) / 255 for i in range(0, 3)) + (1,)))
+    return qah.Colour(*(tuple(int(result[i * 2 : i * 2 + 2], 16) / 255 for i in range(3)) + (1,)))
 #end parse_color
 
 def parse_contents_spec(filename) :
@@ -574,9 +574,8 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
       # scale to height to begin with
     draw.font_matrix = font_matrix
     indent = font_extents.max_x_advance * text_scale
-    for i in range(0, len(spec["tracks"])) :
+    for track in spec["tracks"] :
         # check widths of titles to ensure they don't run off the end
-        track = spec["tracks"][i]
         title_extents = draw.text_extents(track["title"])
         if indent * 2 + title_extents.width > srcdimensions.x - indent :
             text_scale = text_scale * (srcdimensions.x - indent) / (indent * 2 + title_extents.width)
@@ -590,15 +589,14 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
     if not overlay :
         draw.show_text(spec["title"])
     #end if
-    for i in range(0, len(spec["tracks"])) :
-        track = spec["tracks"][i]
+    for i, track in enumerate(spec["tracks"]) :
         v = text_height * (i + 2) + font_extents.ascent * text_scale
         if overlay :
             draw.move_to((indent, v))
             button_extents = draw.text_extents(spec["item_mark"])
             track["button"] = tuple \
               (
-                    int(round(i))
+                round(i)
                 for i in
                     (
                         indent + button_extents.x_bearing, # x
@@ -678,26 +676,28 @@ def button_name(index) :
 #end button_name
 
 def map_button_x(x, spec) :
-    return int(round
-        (
-            x
-        /
-            working_sizes[spec["aspect"]]["dimensions"].x
-        *
-            video_formats[spec["format"]]["dimensions"].x
-        ))
+    return \
+        round \
+            (
+                x
+            /
+                working_sizes[spec["aspect"]]["dimensions"].x
+            *
+                video_formats[spec["format"]]["dimensions"].x
+            )
 #end map_button_x
 
 def map_button_y(y, spec) :
     return \
         (
-            int(round(
+            round
+              (
                     y
                 /
                     working_sizes[spec["aspect"]]["dimensions"].y
                 *
                     video_formats[spec["format"]]["dimensions"].y
-            ))
+              )
         &
             ~1
         )
@@ -726,7 +726,7 @@ def generate_menu_xml(spec, parent_dir, file_names, out) :
       )
     out.write("        >\n")
     nr_tracks = len(spec["tracks"])
-    for i in range(0, nr_tracks) :
+    for i in range(nr_tracks) :
         button = spec["tracks"][i]["button"]
         out.write \
           (
@@ -763,6 +763,7 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
                 "height" : video_formats[spec["format"]]["dimensions"].y,
             }
       )
+    nr_tracks = len(spec["tracks"])
     out.write("<dvdauthor>\n")
     out.write("    <vmgm>\n")
     out.write("        <fpc>\n")
@@ -797,7 +798,7 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
                 "menu" : saxutils.quoteattr(os.path.join(parent_dir, file_names["menu_movie"])),
             }
       )
-    for i in range(0, len(spec["tracks"])) :
+    for i in range(nr_tracks) :
         out.write("                <button name=%s>\n" % saxutils.quoteattr(button_name(i)))
         out.write("                    jump title %d;\n" % (i + 1))
         out.write("                </button>\n")
@@ -809,9 +810,7 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
     out.write("        </menus>\n")
     out.write("        <titles>\n")
     out.write(video_format)
-    nr_tracks = len(spec["tracks"])
-    for i in range(0, nr_tracks) :
-        track = spec["tracks"][i]
+    for i, track in enumerate(spec["tracks"]) :
         out.write("            <pgc pause=\"0\">\n")
         for src in track["src"] :
             out.write \
