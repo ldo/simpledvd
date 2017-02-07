@@ -69,7 +69,7 @@
 #
 # External programs needed: bash, dvdauthor & spumux, ffmpeg, dd
 #
-# Copyright 2008-2013, 2015 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+# Copyright 2008-2017 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 # Licensed under CC-BY-SA <http://creativecommons.org/licenses/by-sa/4.0/>.
 #-
 
@@ -156,8 +156,19 @@ working_sizes = \
 #-
 
 png = ct.cdll.LoadLibrary("libpng12.so.0")
+png.png_create_write_struct.argtypes = (ct.c_char_p, ct.c_void_p, ct.c_void_p, ct.c_void_p)
 png.png_create_write_struct.restype = ct.c_void_p
+png.png_create_info_struct.argtypes = (ct.c_void_p,)
 png.png_create_info_struct.restype = ct.c_void_p
+png.png_set_write_fn.argtypes = (ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_void_p)
+png.png_set_IHDR.argtypes = (ct.c_void_p, ct.c_void_p, ct.c_uint, ct.c_uint, ct.c_int, ct.c_int, ct.c_int, ct.c_int, ct.c_int)
+png.png_set_PLTE.argtypes = (ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_int)
+png.png_set_tRNS.argtypes = (ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_int, ct.c_void_p)
+png.png_write_info.argtypes = (ct.c_void_p, ct.c_void_p)
+png.png_set_packswap.argtypes = (ct.c_void_p,)
+png.png_write_row.argtypes = (ct.c_void_p, ct.c_void_p)
+png.png_write_end.argtypes = (ct.c_void_p, ct.c_void_p)
+png.png_destroy_write_struct.argtypes = (ct.c_void_p, ct.c_void_p)
 
 class PNG :
     "constants and types copied from png.h."
