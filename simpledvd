@@ -93,34 +93,6 @@ from qahirah import \
     Vector
 
 #+
-# Miscellaneous useful stuff
-#-
-
-def shell_escape(Arg) :
-    """returns Arg suitably escaped for use as a command-line argument
-    to Bash."""
-    return \
-        re.sub \
-          (
-            r"[\<\>\"\'\|\&\$\#\;\(\)\[\]\{\}\`\!\~\ \\]",
-            lambda Match : "\\" + Match.group(0),
-            Arg
-          )
-          # Need to catch anything that might be meaningful to shell
-#end shell_escape
-
-def runcmd(cmd) :
-    "runs a command in Bash and waits for it complete."
-    sys.stderr.write("runcmd: %s\n" % cmd) # debug
-    subprocess.check_call \
-      (
-        args = ("bash", "-c", cmd),
-        close_fds = True,
-        shell = False
-      )
-#end runcmd
-
-#+
 # Format definitions
 #-
 
@@ -661,20 +633,31 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
 
 def generate_menu_background(spec, parent_dir, file_names) :
     """runs FFmpeg to create the menu background movie file."""
-    runcmd \
+    from_parent, to_child = os.pipe()
+    os.set_inheritable(from_parent, True)
+    # os.set_inheritable(to_child, False) # default
+    child = subprocess.Popen \
       (
-            "ffmpeg -t 1.0 -i %(stillframename)s"
-            " -ar 48000 -f s16le -i <(dd if=/dev/zero bs=96000 count=1)"
-            " -target %(preset)s -aspect %(aspect)s %(outmenuname)s"
-        %
-            {
-                "stillframename" : shell_escape(os.path.join(parent_dir, file_names["background"])),
-                "preset" : video_formats[spec["format"]]["ffmpeg_preset"],
-                "aspect" : working_sizes[spec["aspect"]]["ffmpeg_aspect"],
-                "outmenuname" :
-                    shell_escape(os.path.join(parent_dir, file_names["menu_background"])),
-            }
+        args =
+            (
+                "ffmpeg", "-t", "1.0",
+                "-i", os.path.join(parent_dir, file_names["background"]),
+                "-ar", "48000", "-f", "s16le",
+                "-i", "/dev/fd/%d" % from_parent,
+                "-target", video_formats[spec["format"]]["ffmpeg_preset"],
+                "-aspect", working_sizes[spec["aspect"]]["ffmpeg_aspect"],
+                os.path.join(parent_dir, file_names["menu_background"]),
+            ),
+        pass_fds = [from_parent],
+        stdin = subprocess.DEVNULL,
       )
+    os.close(from_parent) # only child keeps this
+    os.write(to_child, bytes(96000))
+    os.close(to_child)
+    child.wait()
+    if child.returncode != 0 :
+        raise subprocess.CalledProcessError(child.returncode, "ffmpeg")
+    #end if
 #end generate_menu_background
 
 #+
