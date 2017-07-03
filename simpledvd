@@ -664,7 +664,7 @@ def generate_menu_background(spec, parent_dir, file_names) :
     runcmd \
       (
             "ffmpeg -t 1.0 -i %(stillframename)s"
-            " -ar 48000 -f s16le -i <(dd if=/dev/zero bs=19200 count=1)"
+            " -ar 48000 -f s16le -i <(dd if=/dev/zero bs=96000 count=1)"
             " -target %(preset)s -aspect %(aspect)s %(outmenuname)s"
         %
             {
