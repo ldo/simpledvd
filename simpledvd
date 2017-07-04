@@ -572,7 +572,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
         draw.show_text(spec["title"])
     #end if
     for i, track in enumerate(spec["tracks"]) :
-        v = text_height * (i + 2) + font_extents.ascent * text_scale
+        v = text_height * linespace_factor * (i + 2) + font_extents.ascent * text_scale
         if overlay :
             draw.move_to((indent, v))
             button_extents = draw.text_extents(spec["item_mark"])
