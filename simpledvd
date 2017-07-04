@@ -191,9 +191,9 @@ class PNG :
 #end PNG
 
 def write_bilevel_png(pixels, dimensions, stride, backcolor, forecolor, destfilename) :
-    """writes the buffer object pixels, consisting of dimensions.x * dimensions.y 1-bit pixels,
-    where 0 represents backcolor and 1 represent forecolor (both qahirah.Colour values)
-    to the file named destfilename in PNG format."""
+    "writes the buffer object pixels, consisting of dimensions.x * dimensions.y 1-bit" \
+    " pixels, where 0 represents backcolor and 1 represent forecolor (both qahirah.Colour" \
+    " values) to the file named destfilename in PNG format."
 
     class bytebits(ct.Structure) :
         _fields_ = [("b%d" % i, ct.c_uint, 1) for i in range(8)]
@@ -304,8 +304,8 @@ def cleanup_temp_dir() :
 #-
 
 def parse_color(color) :
-    """parses color as either a standard HTML colour name or #rrggbb. Returns
-    a qahirah.Colour value."""
+    "parses color as either a standard HTML colour name or #rrggbb. Returns" \
+    " a qahirah.Colour value."
     if color[0] == "#" and len(color) == 7 :
         result = color[1:]
     else :
@@ -334,27 +334,26 @@ def parse_color(color) :
 #end parse_color
 
 def parse_contents_spec(filename) :
-    """reads and parses the contents of filename as XML, and returns
-    the interpreted results as a dictionary, as follows:
-        aspect -- the aspect ratio, either "16:9" or "4:3"
-        font -- the Fontconfig font spec
-        format -- the video format, either "ntsc" or "pal"
-        title -- the title for the menu
-        fgcolor -- the foreground colour to use
-        bgcolor -- the background colour to use
-        highlightcolor -- the colour to use to highlight a menu item
-        selectcolor -- the colour to use when a menu item is selected
-        tracks -- a list of the tracks in order, each being a dictionary containing
-                title -- the name to show on the menu
-                src -- the name of the input video file for the track
-    All colours are expressed as qahirah.Colour values.
-    """
+    "reads and parses the contents of filename as XML, and returns" \
+    " the interpreted results as a dictionary, as follows:\n" \
+    "    aspect -- the aspect ratio, either \"16:9\" or \"4:3\"\n" \
+    "    font -- the Fontconfig font spec\n" \
+    "    format -- the video format, either \"ntsc\" or \"pal\"\n" \
+    "    title -- the title for the menu\n" \
+    "    fgcolor -- the foreground colour to use\n" \
+    "    bgcolor -- the background colour to use\n" \
+    "    highlightcolor -- the colour to use to highlight a menu item\n" \
+    "    selectcolor -- the colour to use when a menu item is selected\n" \
+    "    tracks -- a list of the tracks in order, each being a dictionary containing\n" \
+    "            title -- the name to show on the menu\n" \
+    "            src -- the name of the input video file for the track\n" \
+    "All colours are expressed as qahirah.Colour values."
 
     parse_state = {"nest" : 0, "main_seen" : False}
     result = {}
 
     def require_attrs(tag, attrs, attrnames) :
-        """ensures that attrs has values for all keys listed in attrnames."""
+        "ensures that attrs has values for all keys listed in attrnames."
         if not all(name in attrs for name in attrnames) :
             raise RuntimeError("missing required attributes for \"%s\"" % tag)
         #end if
@@ -505,10 +504,10 @@ def parse_contents_spec(filename) :
 #-
 
 def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
-    """renders the menu image into a PNG file named destfilename. overlay
-    is True for the selected and highlighted versions, False for the
-    normal (background) image. Also fills in button dimensions for
-    each track if overlay."""
+    "renders the menu image into a PNG file named destfilename. overlay" \
+    " is True for the selected and highlighted versions, False for the" \
+    " normal (background) image. Also fills in button dimensions for" \
+    " each track if overlay."
     srcdimensions = working_sizes[spec["aspect"]]["dimensions"]
     dstdimensions = video_formats[spec["format"]]["dimensions"]
     format = (CAIRO.FORMAT_ARGB32, CAIRO.FORMAT_A1)[overlay]
@@ -632,7 +631,7 @@ def render_menu(spec, backcolor, forecolor, overlay, destfilename) :
 #end render_menu
 
 def generate_menu_background(spec, parent_dir, file_names) :
-    """runs FFmpeg to create the menu background movie file."""
+    "runs FFmpeg to create the menu background movie file."
     from_parent, to_child = os.pipe()
     os.set_inheritable(from_parent, True)
     # os.set_inheritable(to_child, False) # default
@@ -665,7 +664,7 @@ def generate_menu_background(spec, parent_dir, file_names) :
 #-
 
 def button_name(index) :
-    """generates uniform names for menu buttons."""
+    "generates uniform names for menu buttons."
     return "button_%d" % (index + 1)
 #end button_name
 
@@ -698,7 +697,7 @@ def map_button_y(y, spec) :
 #end map_button_y
 
 def generate_menu_xml(spec, parent_dir, file_names, out) :
-    """generates the XML file used to drive spumux to create the menu movie file."""
+    "generates the XML file used to drive spumux to create the menu movie file."
     out.write("<subpictures>\n")
     out.write("    <stream>\n")
     out.write("        <spu\n")
@@ -744,7 +743,7 @@ def generate_menu_xml(spec, parent_dir, file_names, out) :
 #end generate_menu_xml
 
 def generate_author_xml(spec, parent_dir, file_names, out) :
-    """generates the XML file used to drive dvdauthor to create the complete DVD with a menu."""
+    "generates the XML file used to drive dvdauthor to create the complete DVD with a menu."
     video_format = \
       (
             "            <video format=\"%(format)s\" aspect=\"%(aspect)s\""
@@ -840,8 +839,8 @@ def generate_author_xml(spec, parent_dir, file_names, out) :
 #end generate_author_xml
 
 def generate_simpleplay_xml(spec, parent_dir, out) :
-    """generates the XML file used to drive dvdauthor to create a DVD to play a single track
-    with no menu."""
+    "generates the XML file used to drive dvdauthor to create a DVD to play a single track" \
+    " with no menu."
     out.write("<dvdauthor>\n")
     out.write("    <vmgm>\n")
     out.write("        <fpc>\n")
