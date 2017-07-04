@@ -67,7 +67,7 @@
 #     <track title="Item 2" src="item2.mpg"/>
 # </simpledvd>
 #
-# External programs needed: bash, dvdauthor & spumux, ffmpeg, dd
+# External programs needed: dvdauthor & spumux, ffmpeg
 #
 # Copyright 2008-2017 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 # Licensed under CC-BY-SA <http://creativecommons.org/licenses/by-sa/4.0/>.
